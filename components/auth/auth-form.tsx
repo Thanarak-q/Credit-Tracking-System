@@ -4,7 +4,13 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -91,63 +97,43 @@ export function AuthForm(): React.ReactElement {
     }
   };
 
-  const inputClasses = "bg-slate-900/60 border-slate-700/70 text-slate-100 placeholder:text-slate-400 focus-visible:border-indigo-400 focus-visible:ring-indigo-500/40";
-  const toggleClasses = "h-10 rounded-full text-sm font-semibold transition-colors duration-200";
+  const toggleClasses = "h-10 rounded-md text-sm font-medium transition-colors";
 
   return (
-    <Card className="relative w-full max-w-lg border border-slate-800/70 bg-slate-900/75 p-2 text-slate-100 shadow-[0_30px_140px_-60px_rgba(99,102,241,0.65)] supports-[backdrop-filter]:backdrop-blur-xl">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-16 top-0 -z-10 h-24 rounded-full bg-gradient-to-r from-indigo-500/40 via-sky-400/25 to-violet-500/40 blur-3xl"
-      />
-      <CardHeader className="space-y-3 text-center">
-        <CardDescription className="text-xs uppercase tracking-[0.4rem] text-indigo-300/80">
-          Credit Tracking System
-        </CardDescription>
-        <CardTitle className="text-3xl font-semibold text-slate-50 sm:text-4xl">
+    <Card className="w-full border border-border bg-card/90 shadow-lg backdrop-blur supports-[backdrop-filter]:backdrop-blur">
+      <CardHeader className="space-y-2 text-center">
+        <CardTitle className="text-2xl font-semibold">
           {mode === "login" ? "เข้าสู่ระบบ" : "สร้างบัญชีใหม่"}
         </CardTitle>
-        <CardDescription className="text-sm text-slate-300">
+        <CardDescription>
           {mode === "login"
-            ? "กลับมาจัดการแผนการเรียนของคุณอย่างต่อเนื่อง"
-            : "สร้างบัญชีใหม่เพื่อเริ่มวางแผนหน่วยกิตของคุณ"}
+            ? "กรอกอีเมลและรหัสผ่านเพื่อจัดการแผนการเรียน"
+            : "สร้างบัญชีเพื่อเริ่มต้นวางแผนหน่วยกิตของคุณ"}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-8">
-        <div className="grid gap-2 rounded-full bg-slate-800/60 p-1 sm:grid-cols-2">
+      <CardContent className="space-y-6">
+        <div className="grid grid-cols-2 gap-2">
           <Button
             type="button"
-            variant="ghost"
-            className={cn(
-              toggleClasses,
-              mode === "login"
-                ? "bg-slate-100 text-slate-900 shadow-sm"
-                : "text-slate-300 hover:text-white"
-            )}
+            variant={mode === "login" ? "default" : "outline"}
+            className={cn(toggleClasses, mode === "login" ? undefined : "bg-background/60")}
             onClick={() => handleSwitchMode("login")}
           >
             เข้าสู่ระบบ
           </Button>
           <Button
             type="button"
-            variant="ghost"
-            className={cn(
-              toggleClasses,
-              mode === "register"
-                ? "bg-slate-100 text-slate-900 shadow-sm"
-                : "text-slate-300 hover:text-white"
-            )}
+            variant={mode === "register" ? "default" : "outline"}
+            className={cn(toggleClasses, mode === "register" ? undefined : "bg-background/60")}
             onClick={() => handleSwitchMode("register")}
           >
             สมัครสมาชิก
           </Button>
         </div>
 
-        <form className="space-y-6" onSubmit={handleSubmit}>
+        <form className="space-y-5" onSubmit={handleSubmit}>
           <div className="space-y-2 text-left">
-            <Label htmlFor="email" className="text-sm font-medium text-slate-200">
-              อีเมล
-            </Label>
+            <Label htmlFor="email">อีเมล</Label>
             <Input
               id="email"
               type="email"
@@ -156,15 +142,13 @@ export function AuthForm(): React.ReactElement {
               placeholder="name@example.com"
               value={email}
               onChange={event => setEmail(event.target.value)}
-              className={inputClasses}
+              className="bg-background/50"
               required
             />
           </div>
 
           <div className="space-y-2 text-left">
-            <Label htmlFor="password" className="text-sm font-medium text-slate-200">
-              รหัสผ่าน
-            </Label>
+            <Label htmlFor="password">รหัสผ่าน</Label>
             <Input
               id="password"
               type="password"
@@ -172,16 +156,14 @@ export function AuthForm(): React.ReactElement {
               placeholder="รหัสผ่านอย่างน้อย 8 ตัวอักษร"
               value={password}
               onChange={event => setPassword(event.target.value)}
-              className={inputClasses}
+              className="bg-background/50"
               required
             />
           </div>
 
           {mode === "register" && (
             <div className="space-y-2 text-left">
-              <Label htmlFor="confirm-password" className="text-sm font-medium text-slate-200">
-                ยืนยันรหัสผ่าน
-              </Label>
+              <Label htmlFor="confirm-password">ยืนยันรหัสผ่าน</Label>
               <Input
                 id="confirm-password"
                 type="password"
@@ -189,39 +171,28 @@ export function AuthForm(): React.ReactElement {
                 placeholder="กรอกรหัสผ่านอีกครั้ง"
                 value={confirmPassword}
                 onChange={event => setConfirmPassword(event.target.value)}
-                className={inputClasses}
+                className="bg-background/50"
                 required
               />
             </div>
           )}
 
           {message && (
-            <div
-              className={cn(
-                "rounded-lg border px-4 py-3 text-sm",
-                variant === "neutral" && "border-slate-700/70 bg-slate-900/60 text-slate-200",
-                variant === "error" && "border-red-500/40 bg-red-500/10 text-red-200",
-                variant === "success" && "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-              )}
+            <p
+              className={cn("rounded-md border px-3 py-2 text-sm", {
+                "border-border bg-background/60 text-muted-foreground": variant === "neutral",
+                "border-destructive/40 bg-destructive/10 text-destructive": variant === "error",
+                "border-emerald-500/40 bg-emerald-500/10 text-emerald-300": variant === "success",
+              })}
             >
               {message}
-            </div>
+            </p>
           )}
 
-          <Button
-            type="submit"
-            className="w-full h-11 rounded-lg bg-indigo-500/90 text-white shadow-lg shadow-indigo-500/25 transition hover:bg-indigo-500"
-            disabled={isSubmitting}
-          >
+          <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? "กำลังดำเนินการ..." : mode === "login" ? "เข้าสู่ระบบ" : "สมัครสมาชิก"}
           </Button>
         </form>
-
-        <p className="text-center text-xs text-slate-400">
-          {mode === "login"
-            ? "ยังไม่มีบัญชี? สมัครสมาชิกแล้วเริ่มติดตามหน่วยกิตของคุณได้เลย"
-            : "มีบัญชีอยู่แล้วใช่ไหม? กดที่ปุ่มเข้าสู่ระบบด้านบนเพื่อกลับเข้าสู่ระบบ"}
-        </p>
       </CardContent>
     </Card>
   );
