@@ -123,7 +123,7 @@ export async function getSessionWithUser(token: string): Promise<
 }
 
 export async function setSessionCookie(token: string, expiresAt: Date): Promise<void> {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -134,7 +134,7 @@ export async function setSessionCookie(token: string, expiresAt: Date): Promise<
 }
 
 export async function readUserFromSessionCookie(): Promise<User | null> {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (!token) {
     return null;

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import {
   deleteUserCourse,
@@ -42,22 +42,22 @@ type UpdatePayload = {
 };
 
 export async function PATCH(
-  request: Request,
-  context: { params: { id: string } }
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const user = await readUserFromSessionCookie();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const userCourseId = context.params.id;
+  const { id: userCourseId } = await params;
   if (!userCourseId) {
     return badRequest("Missing course id");
   }
 
   let payload: UpdatePayload;
   try {
-    payload = (await request.json()) as UpdatePayload;
+    payload = (await _request.json()) as UpdatePayload;
   } catch {
     return badRequest("Invalid JSON payload");
   }
@@ -116,15 +116,15 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
-  context: { params: { id: string } }
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const user = await readUserFromSessionCookie();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const userCourseId = context.params.id;
+  const { id: userCourseId } = await params;
   if (!userCourseId) {
     return badRequest("Missing course id");
   }

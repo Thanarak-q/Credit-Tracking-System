@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 const MIN_PASSWORD_LENGTH = 8;
 
-export function AuthForm(): JSX.Element {
+export function AuthForm(): React.ReactElement {
   const router = useRouter();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
