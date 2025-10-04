@@ -1,7 +1,7 @@
 'use client';
 
 import type { ChangeEvent } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Plus, Settings, Trash2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -40,35 +40,33 @@ import {
   TableRow
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import {
+  COURSE_TYPE_KEYS,
+  isCourseTypeKey,
+  type CourseTypeKey
+} from '@/lib/course-types';
+import {
+  createUserCourseApi,
+  deleteUserCourseApi,
+  fetchUserCourses,
+  updateUserCourseApi,
+  type UserCourseDto,
+  type UpdateUserCoursePayload
+} from '@/lib/user-course-api';
 
 type Course = {
+  id: string;
+  courseId: string;
   code: string;
   nameEN: string;
   nameTH: string;
   credits: number;
   year: number;
   semester: number;
-  id?: number;
-};
-
-type CourseProgress = {
+  courseType: CourseTypeKey | '';
   completed: boolean;
+  position: number;
 };
-
-type CourseTypeKey = 'required' | 'core' | 'major' | 'majorElective' | 'minor' | 'free' | 'ge';
-
-const courseTypeKeys: readonly CourseTypeKey[] = [
-  'required',
-  'core',
-  'major',
-  'majorElective',
-  'minor',
-  'free',
-  'ge'
-] as const;
-
-const isCourseTypeKey = (value: string): value is CourseTypeKey =>
-  (courseTypeKeys as readonly string[]).includes(value);
 
 const typeColors: Record<CourseTypeKey, string> = {
   required:
@@ -97,57 +95,6 @@ const typeLabels: Record<CourseTypeKey, string> = {
   ge: 'วิชา GE'
 };
 
-const initialCoursesData: Course[] = [
-  // Year 1 Semester 1
-  { code: '001101', nameEN: 'Fundamental English 1', nameTH: 'ภาษาอังกฤษพื้นฐาน 1', credits: 3, year: 1, semester: 1 },
-  { code: '140104', nameEN: 'Citizenship', nameTH: 'การเป็นพลเมือง', credits: 3, year: 1, semester: 1 },
-  { code: '203103', nameEN: 'General Chemistry 1', nameTH: 'เคมีทั่วไป 1', credits: 3, year: 1, semester: 1 },
-  { code: '204111', nameEN: 'Fundamentals of Programming', nameTH: 'การเขียนโปรแกรมเบื้องต้น', credits: 3, year: 1, semester: 1 },
-  { code: '206111', nameEN: 'Calculus 1', nameTH: 'แคลคูลัส 1', credits: 3, year: 1, semester: 1 },
-  { code: '206183', nameEN: 'Discrete Structure', nameTH: 'โครงสร้างเชิงวิจักษ์', credits: 3, year: 1, semester: 1 },
-  
-  // Year 1 Semester 2
-  { code: '001102', nameEN: 'Fundamental English 2', nameTH: 'ภาษาอังกฤษพื้นฐาน 2', credits: 3, year: 1, semester: 2 },
-  { code: '202101', nameEN: 'Basic Biology 1', nameTH: 'ชีววิทยาพื้นฐาน 1', credits: 3, year: 1, semester: 2 },
-  { code: '204100', nameEN: 'Information Technology and Modern Life', nameTH: 'เทคโนโลยีสารสนเทศและชีวิตสมัยใหม่', credits: 3, year: 1, semester: 2 },
-  { code: '204114', nameEN: 'Introduction to Object-oriented Programming', nameTH: 'การเขียนโปรแกรมเชิงวัตถุเบื้องต้น', credits: 3, year: 1, semester: 2 },
-  { code: '206112', nameEN: 'Calculus 2', nameTH: 'แคลคูลัส 2', credits: 3, year: 1, semester: 2 },
-  { code: '207187', nameEN: 'Physics 1', nameTH: 'ฟิสิกส์ 1', credits: 3, year: 1, semester: 2 },
-  
-  // Year 2 Semester 1
-  { code: '001201', nameEN: 'Critical Reading and Effective Writing', nameTH: 'การอ่านอย่างมีวิจารณญาณและการเขียนอย่างมีประสิทธิผล', credits: 3, year: 2, semester: 1 },
-  { code: '201190', nameEN: 'Critical Thinking, Problem Solving and Science Communication', nameTH: 'การคิดอย่างมีวิจารณญาณ การแก้ปัญหา และการสื่อสารทางวิทยาศาสตร์', credits: 3, year: 2, semester: 1 },
-  { code: '204203', nameEN: 'Computer Science Technology', nameTH: 'เทคโนโลยีด้านวิทยาการคอมพิวเตอร์', credits: 3, year: 2, semester: 1 },
-  { code: '204231', nameEN: 'Computer Organization and Architecture', nameTH: 'การจัดระบบและสถาปัตยกรรมคอมพิวเตอร์', credits: 3, year: 2, semester: 1 },
-  { code: '204252', nameEN: 'Data Structures and Analysis', nameTH: 'โครงสร้างข้อมูลและการวิเคราะห์', credits: 3, year: 2, semester: 1 },
-  { code: '208269', nameEN: 'Statistics for Computer Science', nameTH: 'สถิติสำหรับวิทยาการคอมพิวเตอร์', credits: 3, year: 2, semester: 1 },
-  
-  // Year 2 Semester 2
-  { code: '001225', nameEN: 'English in Science and Technology Context', nameTH: 'ภาษาอังกฤษในบริบทวิทยาศาสตร์และเทคโนโลยี', credits: 3, year: 2, semester: 2 },
-  { code: '201111', nameEN: 'The World of Science', nameTH: 'โลกแห่งวิทยาศาสตร์', credits: 3, year: 2, semester: 2 },
-  { code: '204217', nameEN: 'Modern Application Development', nameTH: 'การพัฒนาแอปพลิเคชันสมัยใหม่', credits: 3, year: 2, semester: 2 },
-  { code: '204232', nameEN: 'Computer Networks and Protocols', nameTH: 'เครือข่ายคอมพิวเตอร์และโปรโตคอล', credits: 3, year: 2, semester: 2 },
-  { code: '204271', nameEN: 'Introduction to Artificial Intelligence', nameTH: 'ปัญญาประดิษฐ์เบื้องต้น', credits: 3, year: 2, semester: 2 },
-  
-  // Year 3 Semester 1
-  { code: '204321', nameEN: 'Database Systems', nameTH: 'ระบบฐานข้อมูล', credits: 3, year: 3, semester: 1 },
-  { code: '204341', nameEN: 'Operating Systems', nameTH: 'ระบบปฏิบัติการ', credits: 3, year: 3, semester: 1 },
-  { code: '204361', nameEN: 'Software Engineering', nameTH: 'วิศวกรรมซอฟต์แวร์', credits: 3, year: 3, semester: 1 },
-  { code: '204451', nameEN: 'Algorithm Design and Analysis', nameTH: 'การออกแบบและการวิเคราะห์อัลกอริทึม', credits: 3, year: 3, semester: 1 },
-  
-  // Year 3 Semester 2
-  { code: '204306', nameEN: 'Ethics for Computer Professionals', nameTH: 'จริยธรรมสำหรับผู้ประกอบวิชาชีพคอมพิวเตอร์', credits: 1, year: 3, semester: 2 },
-  { code: '204315', nameEN: 'Organization of Programming Languages', nameTH: 'การจัดระเบียนองภาษาโปรแกรม', credits: 3, year: 3, semester: 2 },
-  { code: '204490', nameEN: 'Research in Computer Science', nameTH: 'การวิจัยทางวิทยาการคอมพิวเตอร์', credits: 3, year: 3, semester: 2 },
-  
-  // Year 4 Semester 1
-  { code: '204390', nameEN: 'Computer Job Training', nameTH: 'การฝึกงานคอมพิวเตอร์', credits: 1, year: 4, semester: 1 },
-  { code: '204495', nameEN: 'Cooperative Education', nameTH: 'สหกิจศึกษา', credits: 6, year: 4, semester: 1 },
-  
-  // Year 4 Semester 2
-  { code: '204497', nameEN: 'Seminar in Computer Science', nameTH: 'สัมมนาทางวิทยาการคอมพิวเตอร์', credits: 1, year: 4, semester: 2 },
-];
-
 const planRequirements = {
   regular: { name: 'แผนปกติ', majorElective: 15 },
   coop: { name: 'แผนสหกิจศึกษา', majorElective: 12 },
@@ -156,161 +103,202 @@ const planRequirements = {
 
 type PlanKey = keyof typeof planRequirements;
 
-const isBrowser = typeof window !== 'undefined';
-
-const isPlanKey = (value: string): value is PlanKey =>
-  Object.prototype.hasOwnProperty.call(planRequirements, value);
-
-const readStoredPlan = (): PlanKey | '' => {
-  if (!isBrowser) return '';
-  const stored = window.localStorage.getItem('selectedPlan');
-  return stored && isPlanKey(stored) ? stored : '';
-};
-
-const readStoredCourses = (): Course[] => {
-  if (!isBrowser) return initialCoursesData;
-  const saved = window.localStorage.getItem('courses');
-
-  if (!saved) return initialCoursesData;
-
-  try {
-    const parsed = JSON.parse(saved) as Course[];
-    return Array.isArray(parsed) ? parsed : initialCoursesData;
-  } catch (error) {
-    console.error('Failed to parse courses from localStorage', error);
-    return initialCoursesData;
-  }
-};
-
-const readStoredProgress = (): Record<string, CourseProgress> => {
-  if (!isBrowser) return {};
-  const saved = window.localStorage.getItem('progress');
-
-  if (!saved) return {};
-
-  try {
-    const parsed = JSON.parse(saved) as Record<string, CourseProgress>;
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (error) {
-    console.error('Failed to parse progress from localStorage', error);
-    return {};
-  }
-};
-
-const readStoredCourseTypes = (): Record<string, CourseTypeKey> => {
-  if (!isBrowser) return {};
-  const saved = window.localStorage.getItem('courseTypes');
-
-  if (!saved) return {};
-
-  try {
-    const parsed = JSON.parse(saved) as Record<string, CourseTypeKey>;
-    if (!parsed || typeof parsed !== 'object') return {};
-
-    return Object.entries(parsed).reduce<Record<string, CourseTypeKey>>((acc, [key, value]) => {
-      if (typeof value === 'string' && isCourseTypeKey(value)) {
-        acc[key] = value;
-      }
-      return acc;
-    }, {});
-  } catch (error) {
-    console.error('Failed to parse course types from localStorage', error);
-    return {};
-  }
-};
+type PendingMap = Record<string, boolean>;
 
 type CourseTrackerProps = {
   userEmail?: string;
 };
 
+const isBrowser = typeof window !== 'undefined';
+
+const isPlanKey = (value: string): value is PlanKey =>
+  Object.prototype.hasOwnProperty.call(planRequirements, value);
+
+const mapDtoToCourse = (dto: UserCourseDto): Course => ({
+  id: dto.id,
+  courseId: dto.courseId,
+  code: dto.code ?? '',
+  nameEN: dto.nameEN ?? '',
+  nameTH: dto.nameTH ?? '',
+  credits: dto.credits ?? 0,
+  year: dto.year ?? 0,
+  semester: dto.semester ?? 0,
+  courseType: isCourseTypeKey(dto.courseType) ? dto.courseType : '',
+  completed: Boolean(dto.completed),
+  position: dto.position ?? 0
+});
+
+const sortCourses = (courseList: Course[]) =>
+  courseList
+    .slice()
+    .sort((a, b) =>
+      a.year !== b.year
+        ? a.year - b.year
+        : a.semester !== b.semester
+        ? a.semester - b.semester
+        : a.position !== b.position
+        ? a.position - b.position
+        : a.code.localeCompare(b.code)
+    );
+
+const buildEmptyCompletedBuckets = () =>
+  COURSE_TYPE_KEYS.reduce<Record<CourseTypeKey, Course[]>>((acc, type) => {
+    acc[type] = [];
+    return acc;
+  }, {} as Record<CourseTypeKey, Course[]>);
+
 export default function CourseTracker({ userEmail }: CourseTrackerProps) {
   const [selectedPlan, setSelectedPlan] = useState<PlanKey | ''>('');
-  const [showPlanModal, setShowPlanModal] = useState<boolean>(true);
-  const [courses, setCourses] = useState<Course[]>(initialCoursesData);
-  const [progress, setProgress] = useState<Record<string, CourseProgress>>({});
-  const [courseTypes, setCourseTypes] = useState<Record<string, CourseTypeKey>>({});
-  const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false);
+  const [showPlanModal, setShowPlanModal] = useState(true);
+  const [planLoaded, setPlanLoaded] = useState(false);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isCreating, setIsCreating] = useState(false);
+  const [pendingMap, setPendingMap] = useState<PendingMap>({});
+  const [error, setError] = useState<string | null>(null);
+  const [newCourseYear, setNewCourseYear] = useState(1);
+  const [newCourseSemester, setNewCourseSemester] = useState(1);
+
+  const markPending = useCallback((id: string, value: boolean) => {
+    setPendingMap(prev => {
+      const next = { ...prev };
+      if (value) {
+        next[id] = true;
+      } else {
+        delete next[id];
+      }
+      return next;
+    });
+  }, []);
+
+  const handleApiError = useCallback((err: unknown) => {
+    const message = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์';
+    setError(message);
+  }, []);
+
+  const loadCourses = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await fetchUserCourses();
+      setCourses(sortCourses(data.map(mapDtoToCourse)));
+    } catch (err) {
+      handleApiError(err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [handleApiError]);
+
+  useEffect(() => {
+    void loadCourses();
+  }, [loadCourses]);
 
   useEffect(() => {
     if (!isBrowser) return;
 
-    const storedPlan = readStoredPlan();
-    const storedCourses = readStoredCourses();
-    const storedProgress = readStoredProgress();
-    const storedCourseTypes = readStoredCourseTypes();
-
-    setSelectedPlan(storedPlan);
-    setShowPlanModal(!storedPlan);
-    setCourses(storedCourses);
-    setProgress(storedProgress);
-    setCourseTypes(storedCourseTypes);
-    setHasLoadedFromStorage(true);
+    const stored = window.localStorage.getItem('selectedPlan');
+    if (stored && isPlanKey(stored)) {
+      setSelectedPlan(stored);
+      setShowPlanModal(false);
+    }
+    setPlanLoaded(true);
   }, []);
 
   useEffect(() => {
-    if (!isBrowser || !hasLoadedFromStorage) return;
-    window.localStorage.setItem('selectedPlan', selectedPlan);
-  }, [selectedPlan, hasLoadedFromStorage]);
+    if (!isBrowser || !planLoaded) return;
 
-  useEffect(() => {
-    if (!isBrowser || !hasLoadedFromStorage) return;
-    window.localStorage.setItem('courses', JSON.stringify(courses));
-  }, [courses, hasLoadedFromStorage]);
+    if (selectedPlan) {
+      window.localStorage.setItem('selectedPlan', selectedPlan);
+    } else {
+      window.localStorage.removeItem('selectedPlan');
+    }
+  }, [planLoaded, selectedPlan]);
 
-  useEffect(() => {
-    if (!isBrowser || !hasLoadedFromStorage) return;
-    window.localStorage.setItem('progress', JSON.stringify(progress));
-  }, [progress, hasLoadedFromStorage]);
+  const shouldShowPlanModal = planLoaded ? showPlanModal : false;
 
-  useEffect(() => {
-    if (!isBrowser || !hasLoadedFromStorage) return;
-    window.localStorage.setItem('courseTypes', JSON.stringify(courseTypes));
-  }, [courseTypes, hasLoadedFromStorage]);
+  const getCourseKey = (course: Course): string => course.id;
+  const isCoursePending = (courseId: string) => Boolean(pendingMap[courseId]);
 
-  const getCourseKey = (course: Course): string => String(course.id ?? course.code);
+  const persistCourseUpdates = useCallback(
+    async (courseId: string, payload: UpdateUserCoursePayload, snapshot: Course) => {
+      markPending(courseId, true);
+      try {
+        const updated = await updateUserCourseApi(courseId, payload);
+        setCourses(prev => prev.map(course => (course.id === courseId ? mapDtoToCourse(updated) : course)));
+        setError(null);
+      } catch (err) {
+        setCourses(prev => prev.map(course => (course.id === courseId ? snapshot : course)));
+        handleApiError(err);
+      } finally {
+        markPending(courseId, false);
+      }
+    },
+    [handleApiError, markPending]
+  );
 
-  const addCourse = (year: number, semester: number) => {
-    const newCourse: Course = {
-      code: '',
-      nameEN: '',
-      nameTH: '',
-      credits: 3,
-      year,
-      semester,
-      id: Date.now()
-    };
-
-    setCourses(prev => [...prev, newCourse]);
+  const handleAddCourse = async (year: number, semester: number) => {
+    setError(null);
+    setIsCreating(true);
+    try {
+      const created = await createUserCourseApi({ year, semester, credits: 3 });
+      setCourses(prev => sortCourses([...prev, mapDtoToCourse(created)]));
+    } catch (err) {
+      handleApiError(err);
+    } finally {
+      setIsCreating(false);
+    }
   };
 
-  const deleteCourse = (courseId: string) => {
-    setCourses(prev => prev.filter(course => getCourseKey(course) !== courseId));
-    setProgress(prev => {
-      const next = { ...prev };
-      delete next[courseId];
-      return next;
-    });
-    setCourseTypes(prev => {
-      const next = { ...prev };
-      delete next[courseId];
-      return next;
-    });
+  const handleDeleteCourse = async (courseId: string) => {
+    const snapshot = courses.map(course => ({ ...course }));
+    setCourses(prev => prev.filter(course => course.id !== courseId));
+    markPending(courseId, true);
+    try {
+      await deleteUserCourseApi(courseId);
+      setError(null);
+    } catch (err) {
+      setCourses(snapshot);
+      handleApiError(err);
+    } finally {
+      markPending(courseId, false);
+    }
   };
 
-  type EditableCourseField = 'code' | 'nameEN' | 'nameTH' | 'credits';
+  const handleToggleCompletion = async (courseId: string) => {
+    const course = courses.find(item => item.id === courseId);
+    if (!course) return;
+    const snapshot = { ...course };
+    const updatedCompleted = !course.completed;
+    setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, completed: updatedCompleted } : item)));
+    await persistCourseUpdates(courseId, { completed: updatedCompleted }, snapshot);
+  };
 
-  const updateCourse = (courseId: string, field: EditableCourseField, value: string) => {
+  const handleCourseTypeChange = async (courseId: string, type: CourseTypeKey | '') => {
+    const course = courses.find(item => item.id === courseId);
+    if (!course) return;
+    const snapshot = { ...course };
+    const normalized = type || '';
+    if (course.courseType === normalized) {
+      return;
+    }
+    setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, courseType: normalized } : item)));
+    await persistCourseUpdates(courseId, { courseType: normalized || null }, snapshot);
+  };
+
+  const handleCourseFieldChange = (
+    courseId: string,
+    field: 'code' | 'nameEN' | 'nameTH' | 'credits',
+    value: string
+  ) => {
     setCourses(prev =>
       prev.map(course => {
-        if (getCourseKey(course) !== courseId) {
+        if (course.id !== courseId) {
           return course;
         }
 
         if (field === 'credits') {
           const numericCredits = Number(value);
-          return Number.isFinite(numericCredits)
-            ? { ...course, credits: numericCredits }
-            : course;
+          return Number.isFinite(numericCredits) ? { ...course, credits: numericCredits } : course;
         }
 
         return { ...course, [field]: value } as Course;
@@ -318,60 +306,71 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
     );
   };
 
-  const toggleCompletion = (courseId: string) => {
-    setProgress(prev => ({
-      ...prev,
-      [courseId]: { completed: !prev[courseId]?.completed }
-    }));
+  const handleCourseFieldBlur = async (
+    courseId: string,
+    field: 'code' | 'nameEN' | 'nameTH' | 'credits'
+  ) => {
+    const course = courses.find(item => item.id === courseId);
+    if (!course) return;
+
+    const snapshot = { ...course };
+    let payload: UpdateUserCoursePayload | null = null;
+
+    switch (field) {
+      case 'code': {
+        const sanitized = course.code.trim();
+        if (sanitized === snapshot.code) {
+          return;
+        }
+        setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, code: sanitized } : item)));
+        payload = { course: { code: sanitized } };
+        break;
+      }
+      case 'nameEN': {
+        const sanitized = course.nameEN.trim();
+        if (sanitized === snapshot.nameEN) {
+          return;
+        }
+        setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, nameEN: sanitized } : item)));
+        payload = { course: { nameEN: sanitized } };
+        break;
+      }
+      case 'nameTH': {
+        const sanitized = course.nameTH.trim();
+        if (sanitized === snapshot.nameTH) {
+          return;
+        }
+        setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, nameTH: sanitized } : item)));
+        payload = { course: { nameTH: sanitized } };
+        break;
+      }
+      case 'credits': {
+        const sanitized = Number.isFinite(course.credits) ? Math.max(0, course.credits) : snapshot.credits;
+        if (sanitized === snapshot.credits) {
+          return;
+        }
+        setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, credits: sanitized } : item)));
+        payload = { credits: sanitized, course: { credits: sanitized } };
+        break;
+      }
+      default:
+        break;
+    }
+
+    if (!payload) {
+      return;
+    }
+
+    await persistCourseUpdates(courseId, payload, snapshot);
   };
 
-  const updateCourseType = (courseId: string, type: CourseTypeKey | '') => {
-    setCourseTypes(prev => {
-      const next = { ...prev };
-      if (!type) {
-        delete next[courseId];
-        return next;
-      }
-
-      next[courseId] = type;
-      return next;
-    });
-  };
-
-  const credits = useMemo(() => {
-    const summary: Record<CourseTypeKey | 'total', number> = {
-      total: 0,
-      required: 0,
-      core: 0,
-      major: 0,
-      majorElective: 0,
-      minor: 0,
-      free: 0,
-      ge: 0
-    };
-
-    courses.forEach(course => {
-      const courseKey = getCourseKey(course);
-      if (!progress[courseKey]?.completed) {
-        return;
-      }
-
-      const courseType = courseTypes[courseKey];
-      if (!courseType) {
-        return;
-      }
-
-      const numericCredits = Number(course.credits);
-      if (!Number.isFinite(numericCredits)) {
-        return;
-      }
-
-      summary.total += numericCredits;
-      summary[courseType] += numericCredits;
-    });
-
-    return summary;
-  }, [courses, courseTypes, progress]);
+  const planEntries = useMemo(
+    () => Object.entries(planRequirements) as Array<[
+      PlanKey,
+      (typeof planRequirements)[PlanKey]
+    ]>,
+    []
+  );
 
   const requirements = useMemo<Record<CourseTypeKey, number>>(
     () => ({
@@ -386,13 +385,36 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
     [selectedPlan]
   );
 
+  const credits = useMemo(() => {
+    const summary: Record<CourseTypeKey | 'total', number> = {
+      total: 0,
+      required: 0,
+      core: 0,
+      major: 0,
+      majorElective: 0,
+      minor: 0,
+      free: 0,
+      ge: 0
+    };
+
+    courses.forEach(course => {
+      if (!course.completed || !course.courseType) {
+        return;
+      }
+
+      summary.total += course.credits;
+      summary[course.courseType] += course.credits;
+    });
+
+    return summary;
+  }, [courses]);
+
   const totalRequired = useMemo(
     () => Object.values(requirements).reduce((acc, value) => acc + value, 0),
     [requirements]
   );
 
-  const totalPercent =
-    totalRequired > 0 ? Math.min((credits.total / totalRequired) * 100, 100) : 0;
+  const totalPercent = totalRequired > 0 ? Math.min((credits.total / totalRequired) * 100, 100) : 0;
 
   const summaryCards = useMemo(
     () =>
@@ -406,18 +428,11 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
     [credits, requirements]
   );
 
-  const planEntries = useMemo(
-    () => Object.entries(planRequirements) as Array<[
-      PlanKey,
-      (typeof planRequirements)[PlanKey]
-    ]>,
-    []
-  );
-
   const groupedByYear = useMemo(() => {
+    const ordered = sortCourses(courses);
     const byYear = new Map<number, Map<number, Course[]>>();
 
-    courses.forEach(course => {
+    ordered.forEach(course => {
       if (!byYear.has(course.year)) {
         byYear.set(course.year, new Map());
       }
@@ -441,30 +456,16 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
       }));
   }, [courses]);
 
-  const completedCoursesByType = useMemo(
-    () =>
-      (Object.keys(typeLabels) as CourseTypeKey[]).reduce<Record<CourseTypeKey, Course[]>>(
-        (acc, type) => {
-          acc[type] = courses.filter(course => {
-            const courseKey = getCourseKey(course);
-            return progress[courseKey]?.completed && courseTypes[courseKey] === type;
-          });
-          return acc;
-        },
-        {
-          required: [],
-          core: [],
-          major: [],
-          majorElective: [],
-          minor: [],
-          free: [],
-          ge: []
-        }
-      ),
-    [courses, progress, courseTypes]
-  );
-
-  const shouldShowPlanModal = hasLoadedFromStorage ? showPlanModal : false;
+  const completedCoursesByType = useMemo(() => {
+    const buckets = buildEmptyCompletedBuckets();
+    courses.forEach(course => {
+      if (!course.completed || !course.courseType) {
+        return;
+      }
+      buckets[course.courseType].push(course);
+    });
+    return buckets;
+  }, [courses]);
 
   const handlePlanModalChange = (open: boolean) => {
     if (!open && !selectedPlan) {
@@ -486,136 +487,204 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
           ระบบจัดการแผนการเรียน
         </div>
       </header>
-      <Dialog open={shouldShowPlanModal} onOpenChange={handlePlanModalChange}>
+
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4">
+        {error && (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+
+        {isLoading && courses.length === 0 && (
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              กำลังโหลดข้อมูลรายวิชาจากระบบ...
+            </CardContent>
+          </Card>
+        )}
+
+        <Dialog open={shouldShowPlanModal} onOpenChange={handlePlanModalChange}>
           <DialogContent showCloseButton={Boolean(selectedPlan)}>
             <DialogHeader>
-            <DialogTitle>เลือกแผนการศึกษา</DialogTitle>
-            <DialogDescription>
-              กรุณาเลือกแผนการศึกษาของคุณก่อนเริ่มจัดการหน่วยกิต
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-3">
-            {planEntries.map(([key, plan]) => (
-              <Button
-                key={key}
-                variant={selectedPlan === key ? 'default' : 'outline'}
-                className={cn(
-                  'w-full justify-between rounded-lg px-4 py-3 text-left',
-                  selectedPlan === key && 'ring-2 ring-primary'
-                )}
-                onClick={() => {
-                  setSelectedPlan(key);
-                  setShowPlanModal(false);
-                }}
-              >
-                <span className="flex flex-col">
-                  <span className="text-base font-semibold">{plan.name}</span>
-                  <span className="text-sm text-muted-foreground">
-                    วิชาเอกเลือก {plan.majorElective} หน่วยกิต
+              <DialogTitle>เลือกแผนการศึกษา</DialogTitle>
+              <DialogDescription>
+                กรุณาเลือกแผนการศึกษาของคุณก่อนเริ่มจัดการหน่วยกิต
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-3">
+              {planEntries.map(([key, plan]) => (
+                <Button
+                  key={key}
+                  variant={selectedPlan === key ? 'default' : 'outline'}
+                  className={cn(
+                    'w-full justify-between rounded-lg px-4 py-3 text-left',
+                    selectedPlan === key && 'ring-2 ring-primary'
+                  )}
+                  onClick={() => {
+                    setSelectedPlan(key);
+                    setShowPlanModal(false);
+                  }}
+                >
+                  <span className="flex flex-col">
+                    <span className="text-base font-semibold">{plan.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      วิชาเลือกเฉพาะสาขาอย่างน้อย {plan.majorElective} หน่วยกิต
+                    </span>
                   </span>
-                </span>
-                {selectedPlan === key && <Check className="h-5 w-5" />}
-              </Button>
-            ))}
-          </div>
-          <DialogFooter className="sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-muted-foreground">
-              คุณสามารถเปลี่ยนแผนการศึกษาได้ทุกเมื่อจากเมนูด้านบน
-            </p>
-            <Button variant="outline" onClick={() => setShowPlanModal(false)} disabled={!selectedPlan}>
-              ปิด
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                  {selectedPlan === key && <Check className="h-5 w-5" />}
+                </Button>
+              ))}
+            </div>
+            <DialogFooter>
+              {!selectedPlan && (
+                <p className="text-xs text-muted-foreground">
+                  จะไม่สามารถปิดหน้าต่างนี้จนกว่าจะเลือกแผนการศึกษา
+                </p>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-      <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4">
-        <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-2">
-            <h1 className="text-3xl font-semibold text-foreground">
-              ระบบติดตามหน่วยกิตการศึกษา
-            </h1>
-            <p className="text-muted-foreground">
-              บริหารจัดการแผนการเรียน พร้อมคำนวณหน่วยกิตแยกตามประเภทวิชา
-            </p>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Badge variant="secondary" className="justify-center px-3 py-1 text-sm">
-              แผนที่เลือก: {planName}
-            </Badge>
-            <Button variant="outline" className="gap-2" onClick={() => setShowPlanModal(true)}>
-              <Settings className="h-4 w-4" />
-              เปลี่ยนแผนการศึกษา
-            </Button>
-          </div>
-        </header>
-
-        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card className="md:col-span-2 lg:col-span-1">
-            <CardHeader>
-              <CardTitle>หน่วยกิตรวม</CardTitle>
-              <CardDescription>
-                {totalRequired > 0
-                  ? `เมื่อรวมทุกประเภทวิชาต้องการ ${totalRequired} หน่วยกิต`
-                  : 'กรุณาเลือกแผนการศึกษาก่อน'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="text-3xl font-semibold">
-                {credits.total} / {totalRequired}
+        <section className="grid gap-4 lg:grid-cols-[2fr,1fr]">
+          <Card>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div className="space-y-1">
+                <CardTitle className="text-lg">สถานะการเก็บหน่วยกิต</CardTitle>
+                <CardDescription>อัปเดตอัตโนมัติเมื่อคุณทำวิชาใด ๆ เสร็จ</CardDescription>
               </div>
-              <Progress value={totalPercent} />
-              <p className="text-sm text-muted-foreground">
-                รวมทั้งหมด {credits.total} หน่วยกิตที่เรียนจบแล้ว
-              </p>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Settings className="h-4 w-4" />
+                <Button variant="ghost" size="sm" onClick={() => setShowPlanModal(true)}>
+                  เปลี่ยนแผน
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="rounded-lg border border-border/50 bg-card px-4 py-5">
+                <div className="mb-3 flex items-center justify-between text-sm font-medium text-muted-foreground">
+                  <span>ความคืบหน้ารวม</span>
+                  <span>{totalPercent.toFixed(1)}%</span>
+                </div>
+                <Progress value={totalPercent} className="h-2" />
+                <div className="mt-3 text-xs text-muted-foreground">
+                  สะสม {credits.total} / {totalRequired} หน่วยกิต
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {summaryCards.map(({ type, label, required, earned, percent }) => (
+                  <div
+                    key={type}
+                    className="rounded-lg border border-border/60 bg-card px-4 py-4 text-sm shadow-sm"
+                  >
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className="font-medium">{label}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {earned} / {required} หน่วยกิต
+                      </span>
+                    </div>
+                    <Progress value={percent} className="h-2" />
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
 
-          {summaryCards.map(({ type, label, required, earned, percent }) => (
-            <Card key={type}>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg">{label}</CardTitle>
-                  <Badge variant="outline" className={cn('px-2 py-0.5', typeColors[type])}>
-                    {type.toUpperCase()}
-                  </Badge>
-                </div>
-                <CardDescription>
-                  {required > 0 ? `ต้องการ ${required} หน่วยกิต` : 'รอเลือกแผนการศึกษา'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="text-2xl font-semibold">
-                  {earned} / {required}
-                </div>
-                <Progress value={percent} />
-              </CardContent>
-            </Card>
-          ))}
+          <Card>
+            <CardHeader>
+              <CardTitle>แผนการศึกษา</CardTitle>
+              <CardDescription>เลือกแผนการจัดหน่วยกิตที่ตรงกับหลักสูตรของคุณ</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border border-primary/40 bg-primary/10 px-4 py-3 text-sm">
+                <div className="font-semibold text-primary">แผนปัจจุบัน</div>
+                <div className="text-primary/80">{planName}</div>
+              </div>
+              <div className="space-y-2 text-xs text-muted-foreground">
+                <p>- หน่วยกิตวิชาเลือกเฉพาะสาขาขั้นต่ำ {requirements.majorElective} หน่วยกิต</p>
+                <p>- สามารถกลับมาเปลี่ยนแผนได้ตลอดเวลา</p>
+                <p>- การเลือกแผนไม่มีผลต่อรายวิชาที่จัดไว้แล้ว</p>
+              </div>
+            </CardContent>
+          </Card>
         </section>
 
-        <section className="flex flex-col gap-6">
+        <section className="space-y-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">ตารางรายวิชา</h2>
+              <p className="text-sm text-muted-foreground">
+                แบ่งตามปีการศึกษาและเทอม สามารถเพิ่ม/แก้ไข/ลบได้ตามต้องการ
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">ปีการศึกษา</span>
+                  <Select
+                    value={String(newCourseYear)}
+                    onValueChange={value => setNewCourseYear(Number(value))}
+                  >
+                    <SelectTrigger className="w-[120px] justify-between">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3, 4].map(year => (
+                        <SelectItem key={year} value={String(year)}>
+                          ปี {year}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">เทอม</span>
+                  <Select
+                    value={String(newCourseSemester)}
+                    onValueChange={value => setNewCourseSemester(Number(value))}
+                  >
+                    <SelectTrigger className="w-[120px] justify-between">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3].map(semester => (
+                        <SelectItem key={semester} value={String(semester)}>
+                          เทอม {semester}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={() => void handleAddCourse(newCourseYear, newCourseSemester)}
+                  disabled={isCreating}
+                >
+                  <Plus className="mr-2 h-4 w-4" /> เพิ่มวิชาใหม่
+                </Button>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => void loadCourses()} disabled={isLoading}>
+                รีเฟรชข้อมูล
+              </Button>
+            </div>
+          </div>
+
           {groupedByYear.map(({ year, semesters }) => (
             <Card key={year}>
               <CardHeader>
-                <CardTitle className="text-2xl">ปีการศึกษา {year}</CardTitle>
-                <CardDescription>
-                  จัดการรายวิชาในปีที่ {year} แยกตามภาคการศึกษา
-                </CardDescription>
+                <CardTitle className="text-base">ปี {year}</CardTitle>
+                <CardDescription>จัดระเบียบรายวิชาของปีนี้โดยแยกตามภาคการศึกษา</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 {semesters.map(({ semester, courses: semesterCourses }) => {
                   const courseCount = semesterCourses.length;
-                  const completedCount = semesterCourses.filter(course => {
-                    const courseKey = getCourseKey(course);
-                    return progress[courseKey]?.completed;
-                  }).length;
+                  const completedCount = semesterCourses.filter(course => course.completed).length;
 
                   return (
                     <div key={`${year}-${semester}`} className="space-y-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
+                        <div>
+                          <div className="flex items-center gap-3">
                             <Badge variant="outline" className="px-3 py-1 text-sm">
                               เทอม {semester}
                             </Badge>
@@ -628,7 +697,8 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                           variant="secondary"
                           size="sm"
                           className="gap-2 self-start sm:self-auto"
-                          onClick={() => addCourse(year, semester)}
+                          onClick={() => void handleAddCourse(year, semester)}
+                          disabled={isCreating}
                         >
                           <Plus className="h-4 w-4" />
                           เพิ่มวิชาในเทอมนี้
@@ -652,20 +722,20 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                             <TableBody>
                               {semesterCourses.map(course => {
                                 const courseKey = getCourseKey(course);
-                                const isCompleted = Boolean(progress[courseKey]?.completed);
-                                const courseType = courseTypes[courseKey];
-                                const selectValue = courseType ?? 'none';
+                                const isPending = isCoursePending(courseKey);
+                                const selectValue = course.courseType || 'none';
 
                                 return (
                                   <TableRow
                                     key={courseKey}
-                                    className={cn(isCompleted && 'bg-muted/40')}
+                                    className={cn(course.completed && 'bg-muted/40')}
                                   >
                                     <TableCell className="text-center">
                                       <div className="flex justify-center">
                                         <Checkbox
-                                          checked={isCompleted}
-                                          onCheckedChange={() => toggleCompletion(courseKey)}
+                                          checked={course.completed}
+                                          disabled={isPending}
+                                          onCheckedChange={() => void handleToggleCompletion(courseKey)}
                                           aria-label={`ทำเครื่องหมายเรียนแล้ว ${course.code || course.nameEN || 'course'}`}
                                         />
                                       </div>
@@ -673,27 +743,33 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                                     <TableCell>
                                       <Input
                                         value={course.code}
+                                        disabled={isPending}
                                         onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                          updateCourse(courseKey, 'code', event.target.value)
+                                          handleCourseFieldChange(courseKey, 'code', event.target.value)
                                         }
+                                        onBlur={() => void handleCourseFieldBlur(courseKey, 'code')}
                                         placeholder="รหัสวิชา"
                                       />
                                     </TableCell>
                                     <TableCell>
                                       <Input
                                         value={course.nameEN}
+                                        disabled={isPending}
                                         onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                          updateCourse(courseKey, 'nameEN', event.target.value)
+                                          handleCourseFieldChange(courseKey, 'nameEN', event.target.value)
                                         }
+                                        onBlur={() => void handleCourseFieldBlur(courseKey, 'nameEN')}
                                         placeholder="ชื่อวิชา (EN)"
                                       />
                                     </TableCell>
                                     <TableCell>
                                       <Input
                                         value={course.nameTH}
+                                        disabled={isPending}
                                         onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                          updateCourse(courseKey, 'nameTH', event.target.value)
+                                          handleCourseFieldChange(courseKey, 'nameTH', event.target.value)
                                         }
+                                        onBlur={() => void handleCourseFieldBlur(courseKey, 'nameTH')}
                                         placeholder="ชื่อวิชา (TH)"
                                       />
                                     </TableCell>
@@ -701,19 +777,22 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                                       <Input
                                         type="number"
                                         value={course.credits}
+                                        disabled={isPending}
                                         onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                          updateCourse(courseKey, 'credits', event.target.value)
+                                          handleCourseFieldChange(courseKey, 'credits', event.target.value)
                                         }
+                                        onBlur={() => void handleCourseFieldBlur(courseKey, 'credits')}
                                         className="text-center"
-                                        min={1}
-                                        max={6}
+                                        min={0}
+                                        max={12}
                                       />
                                     </TableCell>
                                     <TableCell>
                                       <Select
                                         value={selectValue}
+                                        disabled={isPending}
                                         onValueChange={value =>
-                                          updateCourseType(
+                                          void handleCourseTypeChange(
                                             courseKey,
                                             value === 'none' ? '' : (value as CourseTypeKey)
                                           )
@@ -722,20 +801,18 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                                         <SelectTrigger
                                           className={cn(
                                             'w-full justify-between',
-                                            courseType && typeColors[courseType]
+                                            course.courseType && typeColors[course.courseType]
                                           )}
                                         >
                                           <SelectValue placeholder="เลือกประเภทวิชา" />
                                         </SelectTrigger>
                                         <SelectContent>
                                           <SelectItem value="none">ไม่กำหนด</SelectItem>
-                                          <SelectItem value="required">วิชาบังคับ</SelectItem>
-                                          <SelectItem value="core">วิชาแกน</SelectItem>
-                                          <SelectItem value="major">วิชาเอก</SelectItem>
-                                          <SelectItem value="majorElective">วิชาเอกเลือก</SelectItem>
-                                          <SelectItem value="minor">วิชาโท</SelectItem>
-                                          <SelectItem value="ge">วิชา GE</SelectItem>
-                                          <SelectItem value="free">วิชาเสรี</SelectItem>
+                                          {COURSE_TYPE_KEYS.map(type => (
+                                            <SelectItem key={type} value={type}>
+                                              {typeLabels[type]}
+                                            </SelectItem>
+                                          ))}
                                         </SelectContent>
                                       </Select>
                                     </TableCell>
@@ -744,9 +821,10 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                                         variant="ghost"
                                         size="icon-sm"
                                         className="text-destructive hover:text-destructive"
+                                        disabled={isPending}
                                         onClick={() => {
                                           if (window.confirm('ต้องการลบวิชานี้?')) {
-                                            deleteCourse(courseKey);
+                                            void handleDeleteCourse(courseKey);
                                           }
                                         }}
                                       >
@@ -772,7 +850,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
             </Card>
           ))}
 
-          {groupedByYear.length === 0 && (
+          {groupedByYear.length === 0 && !isLoading && (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
                 ยังไม่มีรายวิชาในระบบ เริ่มต้นด้วยการเพิ่มรายวิชาใหม่จากด้านบน
@@ -826,7 +904,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                 );
               })}
 
-              {!Object.values(completedCoursesByType).some(list => list.length > 0) && (
+              {!Object.values(completedCoursesByType).some(list => list.length > 0) && !isLoading && (
                 <div className="rounded-lg border border-dashed border-muted-foreground/40 bg-muted/30 py-10 text-center text-sm text-muted-foreground">
                   ยังไม่มีวิชาที่เรียนผ่าน กรุณาติ๊กเครื่องหมายเรียนแล้วและเลือกประเภทวิชา
                 </div>

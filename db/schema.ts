@@ -1,10 +1,13 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   index,
+  integer,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -56,7 +59,74 @@ export const sessionsRelations = relations(sessions, ({ one }) => ({
   }),
 }));
 
+export const courses = pgTable(
+  "courses",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    code: text("code").notNull(),
+    nameEn: text("name_en").notNull(),
+    nameTh: text("name_th"),
+    defaultCredits: integer("default_credits").notNull().default(3),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .default(sql`now()`),
+  },
+  table => ({
+    codeIdx: uniqueIndex("courses_code_idx").on(table.code),
+  })
+);
+
+export const userCourses = pgTable(
+  "user_courses",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    courseId: uuid("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    year: integer("year"),
+    semester: integer("semester"),
+    courseType: text("course_type"),
+    credits: integer("credits"),
+    completed: boolean("completed").notNull().default(false),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .default(sql`now()`),
+  },
+  table => ({
+    userCourseIdx: index("user_courses_user_idx").on(table.userId, table.courseId, table.year, table.semester),
+  })
+);
+
+export const coursesRelations = relations(courses, ({ many }) => ({
+  userCourses: many(userCourses),
+}));
+
+export const userCoursesRelations = relations(userCourses, ({ one }) => ({
+  user: one(users, {
+    fields: [userCourses.userId],
+    references: [users.id],
+  }),
+  course: one(courses, {
+    fields: [userCourses.courseId],
+    references: [courses.id],
+  }),
+}));
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
+export type Course = typeof courses.$inferSelect;
+export type NewCourse = typeof courses.$inferInsert;
+export type UserCourse = typeof userCourses.$inferSelect;
+export type NewUserCourse = typeof userCourses.$inferInsert;
