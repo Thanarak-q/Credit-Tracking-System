@@ -4,7 +4,13 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -91,24 +97,26 @@ export function AuthForm(): React.ReactElement {
     }
   };
 
+  const toggleClasses = "h-10 rounded-md text-sm font-medium transition-colors";
+
   return (
-    <Card className="w-full max-w-md border-border/60 bg-card/70 backdrop-blur-sm">
+    <Card className="w-full border border-border bg-card/90 shadow-lg backdrop-blur supports-[backdrop-filter]:backdrop-blur">
       <CardHeader className="space-y-2 text-center">
         <CardTitle className="text-2xl font-semibold">
           {mode === "login" ? "เข้าสู่ระบบ" : "สร้างบัญชีใหม่"}
         </CardTitle>
         <CardDescription>
           {mode === "login"
-            ? "กรอกอีเมลและรหัสผ่านเพื่อเข้าสู่ระบบ"
-            : "กรอกข้อมูลเพื่อสร้างบัญชีใหม่"}
+            ? "กรอกอีเมลและรหัสผ่านเพื่อจัดการแผนการเรียน"
+            : "สร้างบัญชีเพื่อเริ่มต้นวางแผนหน่วยกิตของคุณ"}
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="mb-6 flex items-center justify-center gap-3">
+      <CardContent className="space-y-6">
+        <div className="grid grid-cols-2 gap-2">
           <Button
             type="button"
             variant={mode === "login" ? "default" : "outline"}
-            className="w-full"
+            className={cn(toggleClasses, mode === "login" ? undefined : "bg-background/60")}
             onClick={() => handleSwitchMode("login")}
           >
             เข้าสู่ระบบ
@@ -116,15 +124,15 @@ export function AuthForm(): React.ReactElement {
           <Button
             type="button"
             variant={mode === "register" ? "default" : "outline"}
-            className="w-full"
+            className={cn(toggleClasses, mode === "register" ? undefined : "bg-background/60")}
             onClick={() => handleSwitchMode("register")}
           >
             สมัครสมาชิก
           </Button>
         </div>
 
-        <form className="space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-2">
+        <form className="space-y-5" onSubmit={handleSubmit}>
+          <div className="space-y-2 text-left">
             <Label htmlFor="email">อีเมล</Label>
             <Input
               id="email"
@@ -134,11 +142,12 @@ export function AuthForm(): React.ReactElement {
               placeholder="name@example.com"
               value={email}
               onChange={event => setEmail(event.target.value)}
+              className="bg-background/50"
               required
             />
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2 text-left">
             <Label htmlFor="password">รหัสผ่าน</Label>
             <Input
               id="password"
@@ -147,12 +156,13 @@ export function AuthForm(): React.ReactElement {
               placeholder="รหัสผ่านอย่างน้อย 8 ตัวอักษร"
               value={password}
               onChange={event => setPassword(event.target.value)}
+              className="bg-background/50"
               required
             />
           </div>
 
           {mode === "register" && (
-            <div className="space-y-2">
+            <div className="space-y-2 text-left">
               <Label htmlFor="confirm-password">ยืนยันรหัสผ่าน</Label>
               <Input
                 id="confirm-password"
@@ -161,6 +171,7 @@ export function AuthForm(): React.ReactElement {
                 placeholder="กรอกรหัสผ่านอีกครั้ง"
                 value={confirmPassword}
                 onChange={event => setConfirmPassword(event.target.value)}
+                className="bg-background/50"
                 required
               />
             </div>
@@ -168,10 +179,10 @@ export function AuthForm(): React.ReactElement {
 
           {message && (
             <p
-              className={cn("text-sm", {
-                "text-muted-foreground": variant === "neutral",
-                "text-destructive": variant === "error",
-                "text-emerald-500": variant === "success",
+              className={cn("rounded-md border px-3 py-2 text-sm", {
+                "border-border bg-background/60 text-muted-foreground": variant === "neutral",
+                "border-destructive/40 bg-destructive/10 text-destructive": variant === "error",
+                "border-emerald-500/40 bg-emerald-500/10 text-emerald-300": variant === "success",
               })}
             >
               {message}

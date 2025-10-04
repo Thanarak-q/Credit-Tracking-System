@@ -2,10 +2,12 @@
 
 import type { ChangeEvent } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Plus, Settings, Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Check, LogOut, Plus, RotateCcw, Settings, Trash2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
 import {
   Card,
   CardContent,
@@ -50,6 +52,7 @@ import {
   deleteUserCourseApi,
   fetchUserCourses,
   updateUserCourseApi,
+  type CreateUserCoursePayload,
   type UserCourseDto,
   type UpdateUserCoursePayload
 } from '@/lib/user-course-api';
@@ -66,6 +69,7 @@ type Course = {
   courseType: CourseTypeKey | '';
   completed: boolean;
   position: number;
+  isDraft?: boolean;
 };
 
 const typeColors: Record<CourseTypeKey, string> = {
@@ -125,8 +129,65 @@ const mapDtoToCourse = (dto: UserCourseDto): Course => ({
   semester: dto.semester ?? 0,
   courseType: isCourseTypeKey(dto.courseType) ? dto.courseType : '',
   completed: Boolean(dto.completed),
-  position: dto.position ?? 0
+  position: dto.position ?? 0,
+  isDraft: false
 });
+
+const cloneCourse = (course: Course): Course => ({
+  ...course,
+  isDraft: course.isDraft ?? false
+});
+
+const cloneCourses = (list: Course[]): Course[] => list.map(item => cloneCourse({ ...item }));
+
+const sanitizeCourse = (course: Course): Course => ({
+  ...course,
+  code: course.code.trim(),
+  nameEN: course.nameEN.trim(),
+  nameTH: course.nameTH.trim(),
+  credits: Number.isFinite(course.credits) ? Math.max(0, course.credits) : 0,
+  isDraft: course.isDraft ?? false
+});
+
+const buildCreatePayload = (course: Course): CreateUserCoursePayload => {
+  const payload: CreateUserCoursePayload = {
+    year: course.year,
+    semester: course.semester,
+    credits: course.credits
+  };
+
+  if (course.courseType) {
+    payload.courseType = course.courseType;
+  }
+
+  if (course.completed) {
+    payload.completed = true;
+  }
+
+  if (course.code) {
+    payload.code = course.code;
+  }
+
+  if (course.nameEN) {
+    payload.nameEN = course.nameEN;
+  }
+
+  if (course.nameTH) {
+    payload.nameTH = course.nameTH;
+  }
+
+  return payload;
+};
+
+const hasCourseChanged = (current: Course, original: Course): boolean =>
+  current.code !== original.code ||
+  current.nameEN !== original.nameEN ||
+  current.nameTH !== original.nameTH ||
+  current.credits !== original.credits ||
+  current.year !== original.year ||
+  current.semester !== original.semester ||
+  current.courseType !== original.courseType ||
+  current.completed !== original.completed;
 
 const sortCourses = (courseList: Course[]) =>
   courseList
@@ -148,13 +209,17 @@ const buildEmptyCompletedBuckets = () =>
   }, {} as Record<CourseTypeKey, Course[]>);
 
 export default function CourseTracker({ userEmail }: CourseTrackerProps) {
+  const router = useRouter();
   const [selectedPlan, setSelectedPlan] = useState<PlanKey | ''>('');
   const [showPlanModal, setShowPlanModal] = useState(true);
   const [planLoaded, setPlanLoaded] = useState(false);
   const [courses, setCourses] = useState<Course[]>([]);
+  const [originalCourses, setOriginalCourses] = useState<Course[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isCreating, setIsCreating] = useState(false);
   const [pendingMap, setPendingMap] = useState<PendingMap>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newCourseYear, setNewCourseYear] = useState(1);
   const [newCourseSemester, setNewCourseSemester] = useState(1);
@@ -181,7 +246,12 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
     setError(null);
     try {
       const data = await fetchUserCourses();
-      setCourses(sortCourses(data.map(mapDtoToCourse)));
+      const mapped = data.map(mapDtoToCourse);
+      const sorted = sortCourses(mapped);
+      const clonedForView = cloneCourses(sorted);
+      const clonedForOrigin = cloneCourses(sorted);
+      setCourses(clonedForView);
+      setOriginalCourses(clonedForOrigin);
     } catch (err) {
       handleApiError(err);
     } finally {
@@ -219,42 +289,91 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
   const getCourseKey = (course: Course): string => course.id;
   const isCoursePending = (courseId: string) => Boolean(pendingMap[courseId]);
 
-  const persistCourseUpdates = useCallback(
-    async (courseId: string, payload: UpdateUserCoursePayload, snapshot: Course) => {
-      markPending(courseId, true);
-      try {
-        const updated = await updateUserCourseApi(courseId, payload);
-        setCourses(prev => prev.map(course => (course.id === courseId ? mapDtoToCourse(updated) : course)));
-        setError(null);
-      } catch (err) {
-        setCourses(prev => prev.map(course => (course.id === courseId ? snapshot : course)));
-        handleApiError(err);
-      } finally {
-        markPending(courseId, false);
-      }
-    },
-    [handleApiError, markPending]
-  );
+  const unsavedCourseIds = useMemo(() => {
+    const originalMap = new Map(originalCourses.map(course => [course.id, course]));
+    const unsaved = new Set<string>();
 
-  const handleAddCourse = async (year: number, semester: number) => {
-    setError(null);
-    setIsCreating(true);
-    try {
-      const created = await createUserCourseApi({ year, semester, credits: 3 });
-      setCourses(prev => sortCourses([...prev, mapDtoToCourse(created)]));
-    } catch (err) {
-      handleApiError(err);
-    } finally {
-      setIsCreating(false);
+    courses.forEach(course => {
+      if (course.isDraft) {
+        unsaved.add(course.id);
+        return;
+      }
+
+      const original = originalMap.get(course.id);
+      if (!original || hasCourseChanged(course, original)) {
+        unsaved.add(course.id);
+      }
+    });
+
+    return unsaved;
+  }, [courses, originalCourses]);
+
+  const stagedSummary = useMemo(() => {
+    const originalMap = new Map(originalCourses.map(course => [course.id, course]));
+    let newCount = 0;
+    let updatedCount = 0;
+
+    courses.forEach(course => {
+      if (course.isDraft || !originalMap.has(course.id)) {
+        newCount += 1;
+        return;
+      }
+
+      const original = originalMap.get(course.id)!;
+      if (hasCourseChanged(course, original)) {
+        updatedCount += 1;
+      }
+    });
+
+    return { newCount, updatedCount, total: newCount + updatedCount };
+  }, [courses, originalCourses]);
+
+  const hasUnsavedChanges = stagedSummary.total > 0;
+
+  const handleAddCourse = (year: number, semester: number) => {
+    if (isLoggingOut) {
+      return;
     }
+    setError(null);
+    const tempId = `temp-${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)}`;
+    setCourses(prev => {
+      const nextPosition =
+        prev.filter(course => course.year === year && course.semester === semester).length + 1;
+      const newCourse: Course = {
+        id: tempId,
+        courseId: '',
+        code: '',
+        nameEN: '',
+        nameTH: '',
+        credits: 3,
+        year,
+        semester,
+        courseType: '',
+        completed: false,
+        position: nextPosition,
+        isDraft: true
+      };
+      return sortCourses([...prev, newCourse]);
+    });
   };
 
   const handleDeleteCourse = async (courseId: string) => {
-    const snapshot = courses.map(course => ({ ...course }));
-    setCourses(prev => prev.filter(course => course.id !== courseId));
+    const course = courses.find(item => item.id === courseId);
+    if (!course) {
+      return;
+    }
+
+    if (course.isDraft) {
+      setCourses(prev => prev.filter(item => item.id !== courseId));
+      return;
+    }
+
+    const snapshot = courses.map(item => ({ ...item }));
+    setCourses(prev => prev.filter(item => item.id !== courseId));
     markPending(courseId, true);
     try {
       await deleteUserCourseApi(courseId);
+      setOriginalCourses(prev => prev.filter(item => item.id !== courseId));
       setError(null);
     } catch (err) {
       setCourses(snapshot);
@@ -264,25 +383,21 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
     }
   };
 
-  const handleToggleCompletion = async (courseId: string) => {
+  const handleToggleCompletion = (courseId: string) => {
     const course = courses.find(item => item.id === courseId);
     if (!course) return;
-    const snapshot = { ...course };
     const updatedCompleted = !course.completed;
     setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, completed: updatedCompleted } : item)));
-    await persistCourseUpdates(courseId, { completed: updatedCompleted }, snapshot);
   };
 
-  const handleCourseTypeChange = async (courseId: string, type: CourseTypeKey | '') => {
+  const handleCourseTypeChange = (courseId: string, type: CourseTypeKey | '') => {
     const course = courses.find(item => item.id === courseId);
     if (!course) return;
-    const snapshot = { ...course };
     const normalized = type || '';
     if (course.courseType === normalized) {
       return;
     }
     setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, courseType: normalized } : item)));
-    await persistCourseUpdates(courseId, { courseType: normalized || null }, snapshot);
   };
 
   const handleCourseFieldChange = (
@@ -306,50 +421,205 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
     );
   };
 
-  const handleCourseFieldBlur = async (
+  const handleCourseFieldBlur = (
     courseId: string,
     field: 'code' | 'nameEN' | 'nameTH' | 'credits'
   ) => {
     const course = courses.find(item => item.id === courseId);
     if (!course) return;
 
-    const snapshot = { ...course };
-    let payload: UpdateUserCoursePayload | null = null;
-
     switch (field) {
       case 'code': {
         const sanitized = course.code.trim();
         setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, code: sanitized } : item)));
-        payload = { course: { code: sanitized } };
         break;
       }
       case 'nameEN': {
         const sanitized = course.nameEN.trim();
         setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, nameEN: sanitized } : item)));
-        payload = { course: { nameEN: sanitized } };
         break;
       }
       case 'nameTH': {
         const sanitized = course.nameTH.trim();
         setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, nameTH: sanitized } : item)));
-        payload = { course: { nameTH: sanitized } };
         break;
       }
       case 'credits': {
-        const sanitized = Number.isFinite(course.credits) ? Math.max(0, course.credits) : snapshot.credits;
+        const sanitized = Number.isFinite(course.credits) ? Math.max(0, course.credits) : 0;
         setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, credits: sanitized } : item)));
-        payload = { credits: sanitized, course: { credits: sanitized } };
         break;
       }
       default:
         break;
     }
+  };
 
-    if (!payload) {
+  const handleLogout = useCallback(async () => {
+    if (isLoggingOut || isSaving) {
       return;
     }
 
-    await persistCourseUpdates(courseId, payload, snapshot);
+    setIsLoggingOut(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          accept: 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => undefined);
+        const message = payload && typeof payload.error === 'string' ? payload.error : 'ไม่สามารถออกจากระบบได้';
+        throw new Error(message);
+      }
+
+      if (isBrowser) {
+        window.localStorage.removeItem('selectedPlan');
+      }
+
+      setIsSaveDialogOpen(false);
+      setPendingMap({});
+      router.replace('/');
+      router.refresh();
+    } catch (err) {
+      handleApiError(err);
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }, [handleApiError, isLoggingOut, isSaving, router]);
+
+  const handleDiscardChanges = () => {
+    if (isSaving || isLoggingOut) {
+      return;
+    }
+    setError(null);
+    setCourses(cloneCourses(originalCourses));
+    setPendingMap({});
+    setIsSaveDialogOpen(false);
+  };
+
+  const handleConfirmSave = async () => {
+    if (isSaving || isLoggingOut) {
+      return;
+    }
+    const sanitizedCourses = courses.map(sanitizeCourse);
+    setCourses(sanitizedCourses);
+
+    const originalMap = new Map(originalCourses.map(course => [course.id, course]));
+    const draftCourses: Course[] = [];
+    const updates: Array<{ course: Course; payload: UpdateUserCoursePayload }> = [];
+
+    sanitizedCourses.forEach(course => {
+      if (course.isDraft || !originalMap.has(course.id)) {
+        draftCourses.push({ ...course, isDraft: true });
+        return;
+      }
+
+      const original = originalMap.get(course.id)!;
+      const payload: UpdateUserCoursePayload = {};
+      const coursePayload: NonNullable<UpdateUserCoursePayload['course']> = {};
+      let changed = false;
+
+      if (course.code !== original.code) {
+        coursePayload.code = course.code;
+        changed = true;
+      }
+
+      if (course.nameEN !== original.nameEN) {
+        coursePayload.nameEN = course.nameEN;
+        changed = true;
+      }
+
+      if (course.nameTH !== original.nameTH) {
+        coursePayload.nameTH = course.nameTH;
+        changed = true;
+      }
+
+      if (course.credits !== original.credits) {
+        payload.credits = course.credits;
+        coursePayload.credits = course.credits;
+        changed = true;
+      }
+
+      if (course.courseType !== original.courseType) {
+        payload.courseType = course.courseType || null;
+        changed = true;
+      }
+
+      if (course.completed !== original.completed) {
+        payload.completed = course.completed;
+        changed = true;
+      }
+
+      if (course.year !== original.year) {
+        payload.year = course.year;
+        changed = true;
+      }
+
+      if (course.semester !== original.semester) {
+        payload.semester = course.semester;
+        changed = true;
+      }
+
+      if (Object.keys(coursePayload).length > 0) {
+        payload.course = coursePayload;
+      }
+
+      if (changed) {
+        updates.push({ course, payload });
+      }
+    });
+
+    if (draftCourses.length === 0 && updates.length === 0) {
+      setIsSaveDialogOpen(false);
+      return;
+    }
+
+    const pendingIds = [
+      ...draftCourses.map(course => course.id),
+      ...updates.map(item => item.course.id)
+    ];
+    pendingIds.forEach(id => markPending(id, true));
+    setIsSaving(true);
+
+    try {
+      const createdCourses: Course[] = [];
+      for (const draft of draftCourses) {
+        const createdDto = await createUserCourseApi(buildCreatePayload(draft));
+        createdCourses.push(mapDtoToCourse(createdDto));
+      }
+
+      const updatedCoursesMap = new Map<string, Course>();
+      for (const item of updates) {
+        const updatedDto = await updateUserCourseApi(item.course.id, item.payload);
+        updatedCoursesMap.set(item.course.id, mapDtoToCourse(updatedDto));
+      }
+
+      let nextCourses = sanitizedCourses
+        .filter(course => !course.isDraft)
+        .map(course => {
+          const updated = updatedCoursesMap.get(course.id);
+          return updated ? cloneCourse(updated) : cloneCourse(course);
+        });
+
+      const createdClones = createdCourses.map(cloneCourse);
+      nextCourses = sortCourses([...nextCourses, ...createdClones]);
+      setCourses(nextCourses);
+      setOriginalCourses(cloneCourses(nextCourses));
+      setIsSaveDialogOpen(false);
+      setError(null);
+    } catch (err) {
+      await loadCourses();
+      handleApiError(err);
+      setIsSaveDialogOpen(false);
+    } finally {
+      pendingIds.forEach(id => markPending(id, false));
+      setIsSaving(false);
+    }
   };
 
   const planEntries = useMemo(
@@ -465,18 +735,61 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
   const planName = selectedPlan ? planRequirements[selectedPlan].name : 'ยังไม่ได้เลือก';
 
   return (
-    <div className="dark min-h-screen bg-background py-10 text-foreground">
-      <header className="mx-auto mb-6 flex w-full max-w-7xl items-center justify-between px-4">
-        <div className="text-sm text-muted-foreground">
-          ลงชื่อเข้าใช้ด้วย{' '}
-          <span className="font-semibold text-foreground">{userEmail ?? 'ไม่ทราบผู้ใช้'}</span>
+    <div className="dark min-h-screen bg-background text-foreground">
+      <nav className="sticky top-0 z-40 border-b border-border/60 bg-background/95 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/75">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+            <div>
+              ลงชื่อเข้าใช้ด้วย{' '}
+              <span className="font-semibold text-foreground">{userEmail ?? 'ไม่ทราบผู้ใช้'}</span>
+            </div>
+            <Separator orientation="vertical" className="hidden h-6 sm:block" />
+            <div className="rounded-full border border-border/60 bg-card px-4 py-1 text-xs text-muted-foreground">
+              ระบบจัดการแผนการเรียน
+            </div>
+            {hasUnsavedChanges && (
+              <Badge variant="outline" className="border-amber-400 bg-amber-100/60 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                มีการเปลี่ยนแปลง {stagedSummary.total} รายการ
+              </Badge>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              variant="default"
+              size="sm"
+              className="gap-2"
+              disabled={!hasUnsavedChanges || isSaving || isLoggingOut}
+              onClick={() => setIsSaveDialogOpen(true)}
+            >
+              <Check className="h-4 w-4" />
+              ยืนยันการเปลี่ยนแปลง
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-2"
+              disabled={!hasUnsavedChanges || isSaving || isLoggingOut}
+              onClick={handleDiscardChanges}
+            >
+              <RotateCcw className="h-4 w-4" />
+              ยกเลิกการเปลี่ยนแปลง
+            </Button>
+            <Separator orientation="vertical" className="hidden h-6 sm:block" />
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              disabled={isSaving || isLoggingOut}
+              onClick={() => void handleLogout()}
+            >
+              <LogOut className="h-4 w-4" />
+              {isLoggingOut ? 'กำลังออก...' : 'ออกจากระบบ'}
+            </Button>
+          </div>
         </div>
-        <div className="rounded-full border border-border/60 bg-card px-4 py-2 text-xs text-muted-foreground">
-          ระบบจัดการแผนการเรียน
-        </div>
-      </header>
+      </nav>
 
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4">
+      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-6">
         {error && (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}
@@ -529,6 +842,53 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                   จะไม่สามารถปิดหน้าต่างนี้จนกว่าจะเลือกแผนการศึกษา
                 </p>
               )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={isSaveDialogOpen}
+          onOpenChange={open => {
+            if (isSaving || isLoggingOut) {
+              return;
+            }
+            setIsSaveDialogOpen(open);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>ยืนยันการบันทึกข้อมูล</DialogTitle>
+              <DialogDescription>
+                ตรวจสอบจำนวนรายการที่กำลังส่งไปยังเซิร์ฟเวอร์ก่อนยืนยัน
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center justify-between rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+                <span>เพิ่มรายวิชาใหม่</span>
+                <span className="font-semibold text-foreground">{stagedSummary.newCount}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+                <span>ปรับปรุงรายวิชาเดิม</span>
+                <span className="font-semibold text-foreground">{stagedSummary.updatedCount}</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                ระบบจะส่งข้อมูลทั้งหมดในครั้งเดียวเพื่อลดการอัปเดตถี่ ๆ และป้องกันข้อผิดพลาดจากการแก้ไขต่อเนื่อง
+              </p>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={() => setIsSaveDialogOpen(false)}
+                disabled={isSaving || isLoggingOut}
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                onClick={() => void handleConfirmSave()}
+                disabled={isSaving || isLoggingOut || stagedSummary.total === 0}
+              >
+                {isSaving ? 'กำลังบันทึก...' : 'ยืนยัน'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -605,7 +965,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                 แบ่งตามปีการศึกษาและเทอม สามารถเพิ่ม/แก้ไข/ลบได้ตามต้องการ
               </p>
             </div>
-            <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-end">
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">ปีการศึกษา</span>
@@ -646,14 +1006,11 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                 <Button
                   variant="secondary"
                   onClick={() => void handleAddCourse(newCourseYear, newCourseSemester)}
-                  disabled={isCreating}
+                  disabled={isSaving || isLoggingOut}
                 >
                   <Plus className="mr-2 h-4 w-4" /> เพิ่มวิชาใหม่
                 </Button>
               </div>
-              <Button variant="outline" size="sm" onClick={() => void loadCourses()} disabled={isLoading}>
-                รีเฟรชข้อมูล
-              </Button>
             </div>
           </div>
 
@@ -686,7 +1043,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                           size="sm"
                           className="gap-2 self-start sm:self-auto"
                           onClick={() => void handleAddCourse(year, semester)}
-                          disabled={isCreating}
+                          disabled={isSaving || isLoggingOut}
                         >
                           <Plus className="h-4 w-4" />
                           เพิ่มวิชาในเทอมนี้
@@ -711,18 +1068,25 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                               {semesterCourses.map(course => {
                                 const courseKey = getCourseKey(course);
                                 const isPending = isCoursePending(courseKey);
+                                const disableInteractions = isPending || isSaving || isLoggingOut;
+                                const isUnsaved = unsavedCourseIds.has(courseKey);
                                 const selectValue = course.courseType || 'none';
+                                const isDraft = Boolean(course.isDraft);
 
                                 return (
                                   <TableRow
                                     key={courseKey}
-                                    className={cn(course.completed && 'bg-muted/40')}
+                                    className={cn(
+                                      'transition-colors',
+                                      course.completed && !isUnsaved && 'bg-muted/40',
+                                      isUnsaved && 'bg-amber-50/70 dark:bg-amber-500/10'
+                                    )}
                                   >
                                     <TableCell className="text-center">
                                       <div className="flex justify-center">
                                         <Checkbox
                                           checked={course.completed}
-                                          disabled={isPending}
+                                          disabled={disableInteractions}
                                           onCheckedChange={() => void handleToggleCompletion(courseKey)}
                                           aria-label={`ทำเครื่องหมายเรียนแล้ว ${course.code || course.nameEN || 'course'}`}
                                         />
@@ -731,7 +1095,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                                     <TableCell>
                                       <Input
                                         value={course.code}
-                                        disabled={isPending}
+                                        disabled={disableInteractions}
                                         onChange={(event: ChangeEvent<HTMLInputElement>) =>
                                           handleCourseFieldChange(courseKey, 'code', event.target.value)
                                         }
@@ -742,7 +1106,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                                     <TableCell>
                                       <Input
                                         value={course.nameEN}
-                                        disabled={isPending}
+                                        disabled={disableInteractions}
                                         onChange={(event: ChangeEvent<HTMLInputElement>) =>
                                           handleCourseFieldChange(courseKey, 'nameEN', event.target.value)
                                         }
@@ -753,7 +1117,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                                     <TableCell>
                                       <Input
                                         value={course.nameTH}
-                                        disabled={isPending}
+                                        disabled={disableInteractions}
                                         onChange={(event: ChangeEvent<HTMLInputElement>) =>
                                           handleCourseFieldChange(courseKey, 'nameTH', event.target.value)
                                         }
@@ -765,7 +1129,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                                       <Input
                                         type="number"
                                         value={course.credits}
-                                        disabled={isPending}
+                                        disabled={disableInteractions}
                                         onChange={(event: ChangeEvent<HTMLInputElement>) =>
                                           handleCourseFieldChange(courseKey, 'credits', event.target.value)
                                         }
@@ -778,7 +1142,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                                     <TableCell>
                                       <Select
                                         value={selectValue}
-                                        disabled={isPending}
+                                        disabled={disableInteractions}
                                         onValueChange={value =>
                                           void handleCourseTypeChange(
                                             courseKey,
@@ -805,20 +1169,33 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                                       </Select>
                                     </TableCell>
                                     <TableCell className="text-center">
-                                      <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        className="text-destructive hover:text-destructive"
-                                        disabled={isPending}
-                                        onClick={() => {
-                                          if (window.confirm('ต้องการลบวิชานี้?')) {
-                                            void handleDeleteCourse(courseKey);
-                                          }
-                                        }}
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                        <span className="sr-only">ลบวิชา</span>
-                                      </Button>
+                                      <div className="flex flex-col items-center gap-2">
+                                        {isUnsaved && (
+                                          <Badge
+                                            variant="outline"
+                                            className="text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-200"
+                                          >
+                                            ยังไม่บันทึก
+                                          </Badge>
+                                        )}
+                                        <Button
+                                          variant="ghost"
+                                          size="icon-sm"
+                                          className="text-destructive hover:text-destructive"
+                                          disabled={disableInteractions}
+                                          onClick={() => {
+                                            const confirmed = isDraft
+                                              ? true
+                                              : window.confirm('ต้องการลบวิชานี้?');
+                                            if (confirmed) {
+                                              void handleDeleteCourse(courseKey);
+                                            }
+                                          }}
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                          <span className="sr-only">ลบวิชา</span>
+                                        </Button>
+                                      </div>
                                     </TableCell>
                                   </TableRow>
                                 );
@@ -900,7 +1277,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
             </CardContent>
           </Card>
         </section>
-      </div>
+      </main>
     </div>
   );
 }

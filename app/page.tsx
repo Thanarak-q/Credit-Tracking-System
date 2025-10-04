@@ -14,8 +14,10 @@ export default async function HomePage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/10 px-4 py-10 text-foreground">
-      <AuthForm />
-    </div>
+    <main className="flex min-h-svh flex-col justify-center bg-background px-4 py-12 text-foreground sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-md">
+        <AuthForm />
+      </div>
+    </main>
   );
 }
