@@ -319,36 +319,24 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
     switch (field) {
       case 'code': {
         const sanitized = course.code.trim();
-        if (sanitized === snapshot.code) {
-          return;
-        }
         setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, code: sanitized } : item)));
         payload = { course: { code: sanitized } };
         break;
       }
       case 'nameEN': {
         const sanitized = course.nameEN.trim();
-        if (sanitized === snapshot.nameEN) {
-          return;
-        }
         setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, nameEN: sanitized } : item)));
         payload = { course: { nameEN: sanitized } };
         break;
       }
       case 'nameTH': {
         const sanitized = course.nameTH.trim();
-        if (sanitized === snapshot.nameTH) {
-          return;
-        }
         setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, nameTH: sanitized } : item)));
         payload = { course: { nameTH: sanitized } };
         break;
       }
       case 'credits': {
         const sanitized = Number.isFinite(course.credits) ? Math.max(0, course.credits) : snapshot.credits;
-        if (sanitized === snapshot.credits) {
-          return;
-        }
         setCourses(prev => prev.map(item => (item.id === courseId ? { ...item, credits: sanitized } : item)));
         payload = { credits: sanitized, course: { credits: sanitized } };
         break;
