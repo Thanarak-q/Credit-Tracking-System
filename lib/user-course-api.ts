@@ -12,6 +12,10 @@ export type UserCourseDto = {
   courseType: CourseTypeKey | "";
   completed: boolean;
   position: number;
+  scheduleDay: string;
+  scheduleStartTime: string;
+  scheduleEndTime: string;
+  scheduleRoom: string;
 };
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -49,6 +53,10 @@ export type CreateUserCoursePayload = {
   nameEN?: string;
   nameTH?: string;
   credits?: number;
+  scheduleDay?: string | null;
+  scheduleStartTime?: string | null;
+  scheduleEndTime?: string | null;
+  scheduleRoom?: string | null;
 };
 
 export async function createUserCourseApi(payload: CreateUserCoursePayload): Promise<UserCourseDto> {
@@ -72,6 +80,10 @@ export type UpdateUserCoursePayload = {
   courseType?: CourseTypeKey | "" | null;
   completed?: boolean;
   credits?: number;
+  scheduleDay?: string | null;
+  scheduleStartTime?: string | null;
+  scheduleEndTime?: string | null;
+  scheduleRoom?: string | null;
   course?: {
     code?: string;
     nameEN?: string;

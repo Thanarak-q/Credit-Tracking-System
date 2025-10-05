@@ -20,6 +20,10 @@ export type UserCourseRecord = {
   courseType: string | null;
   completed: boolean;
   position: number;
+  scheduleDay: string | null;
+  scheduleStartTime: string | null;
+  scheduleEndTime: string | null;
+  scheduleRoom: string | null;
 };
 
 export type CreateUserCourseInput = {
@@ -32,6 +36,10 @@ export type CreateUserCourseInput = {
   nameEn?: string;
   nameTh?: string | null;
   credits?: number;
+  scheduleDay?: string | null;
+  scheduleStartTime?: string | null;
+  scheduleEndTime?: string | null;
+  scheduleRoom?: string | null;
 };
 
 export type UpdateUserCourseInput = {
@@ -46,6 +54,10 @@ export type UpdateUserCourseInput = {
     nameTh?: string | null;
     credits?: number;
   };
+  scheduleDay?: string | null;
+  scheduleStartTime?: string | null;
+  scheduleEndTime?: string | null;
+  scheduleRoom?: string | null;
 };
 
 function mapRow(row: {
@@ -61,6 +73,10 @@ function mapRow(row: {
   courseType: string | null;
   completed: boolean;
   position: number;
+  scheduleDay: string | null;
+  scheduleStartTime: string | null;
+  scheduleEndTime: string | null;
+  scheduleRoom: string | null;
 }): UserCourseRecord {
   return {
     userCourseId: row.userCourseId,
@@ -74,6 +90,10 @@ function mapRow(row: {
     courseType: row.courseType,
     completed: row.completed,
     position: row.position,
+    scheduleDay: row.scheduleDay,
+    scheduleStartTime: row.scheduleStartTime,
+    scheduleEndTime: row.scheduleEndTime,
+    scheduleRoom: row.scheduleRoom,
   };
 }
 
@@ -92,6 +112,10 @@ export async function getUserCoursePlan(userId: string): Promise<UserCourseRecor
       courseType: userCourses.courseType,
       completed: userCourses.completed,
       position: userCourses.position,
+      scheduleDay: userCourses.scheduleDay,
+      scheduleStartTime: userCourses.scheduleStartTime,
+      scheduleEndTime: userCourses.scheduleEndTime,
+      scheduleRoom: userCourses.scheduleRoom,
     })
     .from(userCourses)
     .innerJoin(courses, eq(userCourses.courseId, courses.id))
@@ -150,6 +174,10 @@ export async function createUserCourse({
   nameEn,
   nameTh,
   credits,
+  scheduleDay,
+  scheduleStartTime,
+  scheduleEndTime,
+  scheduleRoom,
 }: CreateUserCourseInput): Promise<UserCourseRecord> {
   const course = await ensureCourse({ code, nameEn, nameTh, credits });
 
@@ -177,6 +205,10 @@ export async function createUserCourse({
       completed: completed ?? false,
       credits: credits ?? course.defaultCredits,
       position: (maxPosition ?? 0) + 1,
+      scheduleDay: scheduleDay ? scheduleDay.trim().toUpperCase() || null : null,
+      scheduleStartTime: scheduleStartTime ? scheduleStartTime.trim() || null : null,
+      scheduleEndTime: scheduleEndTime ? scheduleEndTime.trim() || null : null,
+      scheduleRoom: scheduleRoom ? scheduleRoom.trim() || null : null,
     })
     .returning();
 
@@ -197,6 +229,10 @@ export async function createUserCourse({
     courseType: userCourse.courseType,
     completed: userCourse.completed,
     position: userCourse.position,
+    scheduleDay: userCourse.scheduleDay,
+    scheduleStartTime: userCourse.scheduleStartTime,
+    scheduleEndTime: userCourse.scheduleEndTime,
+    scheduleRoom: userCourse.scheduleRoom,
   });
 }
 
@@ -256,6 +292,30 @@ export async function updateUserCourse(
   if (typeof input.credits === "number") {
     courseUpdates.credits = input.credits;
   }
+  if (typeof input.scheduleDay === "string") {
+    const trimmed = input.scheduleDay.trim();
+    courseUpdates.scheduleDay = trimmed ? trimmed.toUpperCase() : null;
+  } else if (input.scheduleDay === null) {
+    courseUpdates.scheduleDay = null;
+  }
+  if (typeof input.scheduleStartTime === "string") {
+    const trimmed = input.scheduleStartTime.trim();
+    courseUpdates.scheduleStartTime = trimmed ? trimmed : null;
+  } else if (input.scheduleStartTime === null) {
+    courseUpdates.scheduleStartTime = null;
+  }
+  if (typeof input.scheduleEndTime === "string") {
+    const trimmed = input.scheduleEndTime.trim();
+    courseUpdates.scheduleEndTime = trimmed ? trimmed : null;
+  } else if (input.scheduleEndTime === null) {
+    courseUpdates.scheduleEndTime = null;
+  }
+  if (typeof input.scheduleRoom === "string") {
+    const trimmed = input.scheduleRoom.trim();
+    courseUpdates.scheduleRoom = trimmed ? trimmed : null;
+  } else if (input.scheduleRoom === null) {
+    courseUpdates.scheduleRoom = null;
+  }
 
   if (Object.keys(courseUpdates).length > 0) {
     courseUpdates.updatedAt = new Date();
@@ -276,6 +336,10 @@ export async function updateUserCourse(
       courseType: userCourses.courseType,
       completed: userCourses.completed,
       position: userCourses.position,
+      scheduleDay: userCourses.scheduleDay,
+      scheduleStartTime: userCourses.scheduleStartTime,
+      scheduleEndTime: userCourses.scheduleEndTime,
+      scheduleRoom: userCourses.scheduleRoom,
     })
     .from(userCourses)
     .innerJoin(courses, eq(userCourses.courseId, courses.id))

@@ -20,6 +20,10 @@ function toApiShape(record: UserCourseRecord) {
     courseType: record.courseType ?? "",
     completed: record.completed,
     position: record.position,
+    scheduleDay: record.scheduleDay ?? "",
+    scheduleStartTime: record.scheduleStartTime ?? "",
+    scheduleEndTime: record.scheduleEndTime ?? "",
+    scheduleRoom: record.scheduleRoom ?? "",
   };
 }
 
@@ -46,6 +50,10 @@ type CreatePayload = {
   nameEN?: unknown;
   nameTH?: unknown;
   credits?: unknown;
+  scheduleDay?: unknown;
+  scheduleStartTime?: unknown;
+  scheduleEndTime?: unknown;
+  scheduleRoom?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -79,6 +87,15 @@ export async function POST(request: Request) {
   const code = typeof payload.code === "string" ? payload.code.trim() : undefined;
   const nameEn = typeof payload.nameEN === "string" ? payload.nameEN.trim() : undefined;
   const nameTh = typeof payload.nameTH === "string" ? payload.nameTH.trim() : undefined;
+  const rawScheduleDay = typeof payload.scheduleDay === "string" ? payload.scheduleDay.trim() : undefined;
+  const scheduleDay = rawScheduleDay ? rawScheduleDay.toUpperCase() : undefined;
+  const scheduleStartTime =
+    typeof payload.scheduleStartTime === "string" ? payload.scheduleStartTime.trim() : undefined;
+  const scheduleEndTime =
+    typeof payload.scheduleEndTime === "string" ? payload.scheduleEndTime.trim() : undefined;
+  const rawScheduleRoom =
+    typeof payload.scheduleRoom === "string" ? payload.scheduleRoom.trim() : undefined;
+  const scheduleRoom = rawScheduleRoom && rawScheduleRoom.length > 0 ? rawScheduleRoom : undefined;
 
   try {
     const record = await createUserCourse({
@@ -91,6 +108,10 @@ export async function POST(request: Request) {
       nameEn,
       nameTh,
       credits,
+      scheduleDay: scheduleDay ?? null,
+      scheduleStartTime: scheduleStartTime ?? null,
+      scheduleEndTime: scheduleEndTime ?? null,
+      scheduleRoom: scheduleRoom ?? null,
     });
 
     return NextResponse.json({ course: toApiShape(record) }, { status: 201 });

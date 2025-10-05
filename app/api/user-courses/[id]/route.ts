@@ -20,6 +20,10 @@ function toApiShape(record: UserCourseRecord) {
     courseType: record.courseType ?? "",
     completed: record.completed,
     position: record.position,
+    scheduleDay: record.scheduleDay ?? "",
+    scheduleStartTime: record.scheduleStartTime ?? "",
+    scheduleEndTime: record.scheduleEndTime ?? "",
+    scheduleRoom: record.scheduleRoom ?? "",
   };
 }
 
@@ -39,6 +43,10 @@ type UpdatePayload = {
     nameTH?: unknown;
     credits?: unknown;
   };
+  scheduleDay?: unknown;
+  scheduleStartTime?: unknown;
+  scheduleEndTime?: unknown;
+  scheduleRoom?: unknown;
 };
 
 export async function PATCH(
@@ -81,6 +89,34 @@ export async function PATCH(
   }
   if (typeof payload.credits === "number" && Number.isFinite(payload.credits)) {
     updateInput.credits = payload.credits;
+  }
+
+  if (typeof payload.scheduleDay === "string") {
+    const trimmed = payload.scheduleDay.trim();
+    updateInput.scheduleDay = trimmed ? trimmed.toUpperCase() : null;
+  } else if (payload.scheduleDay === null) {
+    updateInput.scheduleDay = null;
+  }
+
+  if (typeof payload.scheduleStartTime === "string") {
+    const trimmed = payload.scheduleStartTime.trim();
+    updateInput.scheduleStartTime = trimmed ? trimmed : null;
+  } else if (payload.scheduleStartTime === null) {
+    updateInput.scheduleStartTime = null;
+  }
+
+  if (typeof payload.scheduleEndTime === "string") {
+    const trimmed = payload.scheduleEndTime.trim();
+    updateInput.scheduleEndTime = trimmed ? trimmed : null;
+  } else if (payload.scheduleEndTime === null) {
+    updateInput.scheduleEndTime = null;
+  }
+
+  if (typeof payload.scheduleRoom === "string") {
+    const trimmed = payload.scheduleRoom.trim();
+    updateInput.scheduleRoom = trimmed ? trimmed : null;
+  } else if (payload.scheduleRoom === null) {
+    updateInput.scheduleRoom = null;
   }
 
   if (payload.course && typeof payload.course === "object") {

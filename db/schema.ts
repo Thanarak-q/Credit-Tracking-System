@@ -95,6 +95,10 @@ export const userCourses = pgTable(
     credits: integer("credits"),
     completed: boolean("completed").notNull().default(false),
     position: integer("position").notNull().default(0),
+    scheduleDay: text("schedule_day"),
+    scheduleStartTime: text("schedule_start_time"),
+    scheduleEndTime: text("schedule_end_time"),
+    scheduleRoom: text("schedule_room"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .default(sql`now()`),

@@ -1,9 +1,19 @@
 'use client';
 
-import type { ChangeEvent } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ChangeEvent, MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, LogOut, Plus, RotateCcw, Settings, Trash2 } from 'lucide-react';
+import {
+  Calendar as CalendarIcon,
+  Check,
+  Clock,
+  LogOut,
+  Plus,
+  RotateCcw,
+  Settings,
+  Trash2,
+  X
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -69,6 +79,10 @@ type Course = {
   courseType: CourseTypeKey | '';
   completed: boolean;
   position: number;
+  scheduleDay: string | null;
+  scheduleStartTime: string | null;
+  scheduleEndTime: string | null;
+  scheduleRoom: string | null;
   isDraft?: boolean;
 };
 
@@ -116,6 +130,147 @@ type CourseTrackerProps = {
   userEmail?: string;
 };
 
+type ScheduleFieldKey = 'scheduleDay' | 'scheduleStartTime' | 'scheduleEndTime' | 'scheduleRoom';
+type ScheduleUpdate = Partial<Record<ScheduleFieldKey, string | null>>;
+
+const SCHEDULE_DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
+const SCHEDULE_START_HOUR = 7;
+const SCHEDULE_END_HOUR = 19;
+const TOTAL_SCHEDULE_HOURS = SCHEDULE_END_HOUR - SCHEDULE_START_HOUR;
+const TOTAL_SCHEDULE_MINUTES = TOTAL_SCHEDULE_HOURS * 60;
+const SCHEDULE_HOURS = Array.from({ length: TOTAL_SCHEDULE_HOURS + 1 }, (_, index) => index + SCHEDULE_START_HOUR);
+const DAY_COLUMN_WIDTH_PX = 96; // tailwind w-24
+const ROW_HEIGHT_PX = 70; // tailwind h-[70px]
+const MIN_BLOCK_DURATION_HOURS = 0.5;
+const SCHEDULE_COLORS = [
+  'bg-emerald-500',
+  'bg-sky-500',
+  'bg-amber-500',
+  'bg-rose-500',
+  'bg-indigo-500',
+  'bg-lime-500',
+  'bg-fuchsia-500',
+  'bg-cyan-500'
+];
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+type CourseSchedule = {
+  scheduleDay: string | null;
+  scheduleStartTime: string | null;
+  scheduleEndTime: string | null;
+  scheduleRoom: string | null;
+};
+
+const minutesToTime = (minutesFromStart: number): string => {
+  const clamped = clamp(minutesFromStart, 0, TOTAL_SCHEDULE_MINUTES);
+  const totalMinutes = Math.round(clamped / 15) * 15;
+  const hours = SCHEDULE_START_HOUR + Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
+
+const timeStringToMinutes = (value: string | null | undefined): number | null => {
+  if (!value) return null;
+  const [hourPart, minutePart] = value.split(':');
+  const hours = Number.parseInt(hourPart, 10);
+  const minutes = Number.parseInt(minutePart, 10);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return null;
+  }
+  const totalMinutes = (hours - SCHEDULE_START_HOUR) * 60 + minutes;
+  if (Number.isNaN(totalMinutes)) {
+    return null;
+  }
+  return clamp(totalMinutes, 0, TOTAL_SCHEDULE_MINUTES);
+};
+
+const timeToHourOffset = (time: string | null): number => {
+  const minutes = timeStringToMinutes(time);
+  return minutes === null ? 0 : minutes / 60;
+};
+
+const hourOffsetToTime = (offset: number): string => minutesToTime(offset * 60);
+
+const emptySchedule: CourseSchedule = {
+  scheduleDay: null,
+  scheduleStartTime: null,
+  scheduleEndTime: null,
+  scheduleRoom: null,
+};
+
+const getScheduleFromCourse = (course: Course | undefined): CourseSchedule => {
+  if (!course) {
+    return emptySchedule;
+  }
+  return {
+    scheduleDay: course.scheduleDay ?? null,
+    scheduleStartTime: course.scheduleStartTime ?? null,
+    scheduleEndTime: course.scheduleEndTime ?? null,
+    scheduleRoom: course.scheduleRoom ?? null,
+  };
+};
+
+const normalizeSchedule = (input: CourseSchedule): CourseSchedule => {
+  const normalizedDayRaw = input.scheduleDay ? input.scheduleDay.trim().toUpperCase() : null;
+
+  let startMinutes = timeStringToMinutes(input.scheduleStartTime);
+  let endMinutes = timeStringToMinutes(input.scheduleEndTime);
+
+  if (startMinutes !== null) {
+    const maxStart = TOTAL_SCHEDULE_MINUTES - MIN_BLOCK_DURATION_HOURS * 60;
+    startMinutes = clamp(startMinutes, 0, Math.max(0, maxStart));
+  }
+
+  if (endMinutes !== null) {
+    endMinutes = clamp(endMinutes, MIN_BLOCK_DURATION_HOURS * 60, TOTAL_SCHEDULE_MINUTES);
+  }
+
+  if (startMinutes === null && endMinutes !== null) {
+    startMinutes = clamp(endMinutes - MIN_BLOCK_DURATION_HOURS * 60, 0, TOTAL_SCHEDULE_MINUTES);
+  }
+
+  if (startMinutes !== null && endMinutes === null) {
+    endMinutes = clamp(startMinutes + MIN_BLOCK_DURATION_HOURS * 60, MIN_BLOCK_DURATION_HOURS * 60, TOTAL_SCHEDULE_MINUTES);
+  }
+
+  if (startMinutes !== null && endMinutes !== null) {
+    if (endMinutes < startMinutes + MIN_BLOCK_DURATION_HOURS * 60) {
+      endMinutes = clamp(startMinutes + MIN_BLOCK_DURATION_HOURS * 60, MIN_BLOCK_DURATION_HOURS * 60, TOTAL_SCHEDULE_MINUTES);
+    }
+    if (endMinutes > TOTAL_SCHEDULE_MINUTES) {
+      endMinutes = TOTAL_SCHEDULE_MINUTES;
+      startMinutes = clamp(endMinutes - MIN_BLOCK_DURATION_HOURS * 60, 0, TOTAL_SCHEDULE_MINUTES);
+    }
+  }
+
+  const normalizedStart = startMinutes !== null ? minutesToTime(startMinutes) : null;
+  const normalizedEnd = endMinutes !== null ? minutesToTime(endMinutes) : null;
+  const normalizedRoom = input.scheduleRoom && input.scheduleRoom.trim().length > 0 ? input.scheduleRoom.trim() : null;
+
+  const normalizedDay = normalizedDayRaw && SCHEDULE_DAYS.includes(normalizedDayRaw as (typeof SCHEDULE_DAYS)[number])
+    ? normalizedDayRaw
+    : null;
+
+  return {
+    scheduleDay: normalizedDay,
+    scheduleStartTime: normalizedStart,
+    scheduleEndTime: normalizedEnd,
+    scheduleRoom: normalizedRoom,
+  };
+};
+
+const areSchedulesEqual = (a: CourseSchedule | undefined, b: CourseSchedule | undefined): boolean => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.scheduleDay === b.scheduleDay &&
+    a.scheduleStartTime === b.scheduleStartTime &&
+    a.scheduleEndTime === b.scheduleEndTime &&
+    a.scheduleRoom === b.scheduleRoom
+  );
+};
+
 const isBrowser = typeof window !== 'undefined';
 
 const isPlanKey = (value: string): value is PlanKey =>
@@ -133,6 +288,10 @@ const mapDtoToCourse = (dto: UserCourseDto): Course => ({
   courseType: isCourseTypeKey(dto.courseType) ? dto.courseType : '',
   completed: Boolean(dto.completed),
   position: dto.position ?? 0,
+  scheduleDay: dto.scheduleDay ? dto.scheduleDay.toUpperCase() : null,
+  scheduleStartTime: dto.scheduleStartTime || null,
+  scheduleEndTime: dto.scheduleEndTime || null,
+  scheduleRoom: dto.scheduleRoom ? dto.scheduleRoom : null,
   isDraft: false
 });
 
@@ -149,6 +308,10 @@ const sanitizeCourse = (course: Course): Course => ({
   nameEN: course.nameEN.trim(),
   nameTH: course.nameTH.trim(),
   credits: Number.isFinite(course.credits) ? Math.max(0, course.credits) : 0,
+  scheduleDay: course.scheduleDay ? course.scheduleDay.trim().toUpperCase() : null,
+  scheduleStartTime: course.scheduleStartTime ? course.scheduleStartTime.trim() : null,
+  scheduleEndTime: course.scheduleEndTime ? course.scheduleEndTime.trim() : null,
+  scheduleRoom: course.scheduleRoom ? course.scheduleRoom.trim() : null,
   isDraft: course.isDraft ?? false
 });
 
@@ -179,18 +342,41 @@ const buildCreatePayload = (course: Course): CreateUserCoursePayload => {
     payload.nameTH = course.nameTH;
   }
 
+  if (course.scheduleDay) {
+    payload.scheduleDay = course.scheduleDay;
+  }
+
+  if (course.scheduleStartTime && course.scheduleEndTime) {
+    payload.scheduleStartTime = course.scheduleStartTime;
+    payload.scheduleEndTime = course.scheduleEndTime;
+  }
+
+  if (course.scheduleRoom) {
+    payload.scheduleRoom = course.scheduleRoom;
+  }
+
   return payload;
 };
 
-const hasCourseChanged = (current: Course, original: Course): boolean =>
-  current.code !== original.code ||
-  current.nameEN !== original.nameEN ||
-  current.nameTH !== original.nameTH ||
-  current.credits !== original.credits ||
-  current.year !== original.year ||
-  current.semester !== original.semester ||
-  current.courseType !== original.courseType ||
-  current.completed !== original.completed;
+const hasCourseChanged = (current: Course, original: Course): boolean => {
+  const normalizedCurrent = sanitizeCourse(current);
+  const normalizedOriginal = sanitizeCourse(original);
+
+  return (
+    normalizedCurrent.code !== normalizedOriginal.code ||
+    normalizedCurrent.nameEN !== normalizedOriginal.nameEN ||
+    normalizedCurrent.nameTH !== normalizedOriginal.nameTH ||
+    normalizedCurrent.credits !== normalizedOriginal.credits ||
+    normalizedCurrent.year !== normalizedOriginal.year ||
+    normalizedCurrent.semester !== normalizedOriginal.semester ||
+    normalizedCurrent.courseType !== normalizedOriginal.courseType ||
+    normalizedCurrent.completed !== normalizedOriginal.completed ||
+    normalizedCurrent.scheduleDay !== normalizedOriginal.scheduleDay ||
+    normalizedCurrent.scheduleStartTime !== normalizedOriginal.scheduleStartTime ||
+    normalizedCurrent.scheduleEndTime !== normalizedOriginal.scheduleEndTime ||
+    normalizedCurrent.scheduleRoom !== normalizedOriginal.scheduleRoom
+  );
+};
 
 const sortCourses = (courseList: Course[]) =>
   courseList
@@ -210,6 +396,606 @@ const buildEmptyCompletedBuckets = () =>
     acc[type] = [];
     return acc;
   }, {} as Record<CourseTypeKey, Course[]>);
+
+type InteractionState =
+  | {
+      type: 'move';
+      courseId: string;
+      startX: number;
+      startY: number;
+      cellWidth: number;
+      rowHeight: number;
+    }
+  | {
+      type: 'resize';
+      courseId: string;
+      startX: number;
+      cellWidth: number;
+    };
+
+type ScheduleBuilderProps = {
+  year: number;
+  semester: number;
+  courses: Course[];
+  disableInteractions: boolean;
+  isCoursePending: (courseId: string) => boolean;
+  onAddDefault: (courseId: string) => void;
+  onUpdate: (courseId: string, update: ScheduleUpdate) => void;
+  onClear: (courseId: string) => void;
+};
+
+const ScheduleBuilder = ({
+  year,
+  semester,
+  courses,
+  disableInteractions,
+  isCoursePending,
+  onAddDefault,
+  onUpdate,
+  onClear
+}: ScheduleBuilderProps) => {
+  const timelineRef = useRef<HTMLDivElement | null>(null);
+  const [interaction, setInteraction] = useState<InteractionState | null>(null);
+
+  const semesterCourses = useMemo(
+    () =>
+      courses.filter(course => course.year === year && course.semester === semester),
+    [courses, year, semester]
+  );
+
+  const [localSchedules, setLocalSchedules] = useState<Record<string, CourseSchedule>>(() => {
+    const initial: Record<string, CourseSchedule> = {};
+    semesterCourses.forEach(course => {
+      const snapshot = getScheduleFromCourse(course);
+      if (!areSchedulesEqual(snapshot, emptySchedule)) {
+        initial[course.id] = snapshot;
+      }
+    });
+    return initial;
+  });
+
+  const localSchedulesRef = useRef<Record<string, CourseSchedule>>(localSchedules);
+  useEffect(() => {
+    localSchedulesRef.current = localSchedules;
+  }, [localSchedules]);
+
+  const courseMap = useMemo(() => new Map(semesterCourses.map(course => [course.id, course])), [semesterCourses]);
+  const courseMapRef = useRef(courseMap);
+  useEffect(() => {
+    courseMapRef.current = courseMap;
+  }, [courseMap]);
+
+  const pendingCommitRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    setLocalSchedules(prev => {
+      let changed = false;
+      const next: Record<string, CourseSchedule> = { ...prev };
+      const courseIds = new Set<string>();
+
+      semesterCourses.forEach(course => {
+        courseIds.add(course.id);
+        const canonical = getScheduleFromCourse(course);
+        const existing = prev[course.id];
+
+        if (!existing && !areSchedulesEqual(canonical, emptySchedule)) {
+          next[course.id] = canonical;
+          changed = true;
+          return;
+        }
+
+        if (existing && areSchedulesEqual(existing, canonical)) {
+          return;
+        }
+
+        if (!pendingCommitRef.current.has(course.id)) {
+          next[course.id] = canonical;
+          changed = true;
+        }
+      });
+
+      Object.keys(next).forEach(id => {
+        if (!courseIds.has(id)) {
+          delete next[id];
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [semesterCourses]);
+
+  const commitSchedule = useCallback(
+    (courseId: string, scheduleOverride?: CourseSchedule) => {
+      const course = courseMapRef.current.get(courseId);
+      if (!course) {
+        pendingCommitRef.current.delete(courseId);
+        return;
+      }
+
+      const local = scheduleOverride ?? localSchedulesRef.current[courseId];
+      if (!local) {
+        pendingCommitRef.current.delete(courseId);
+        return;
+      }
+
+      const normalized = normalizeSchedule(local);
+      const current = getScheduleFromCourse(course);
+      const updates: ScheduleUpdate = {};
+
+      if (normalized.scheduleDay !== current.scheduleDay) {
+        updates.scheduleDay = normalized.scheduleDay;
+      }
+      if (normalized.scheduleStartTime !== current.scheduleStartTime) {
+        updates.scheduleStartTime = normalized.scheduleStartTime;
+      }
+      if (normalized.scheduleEndTime !== current.scheduleEndTime) {
+        updates.scheduleEndTime = normalized.scheduleEndTime;
+      }
+      if (normalized.scheduleRoom !== current.scheduleRoom) {
+        updates.scheduleRoom = normalized.scheduleRoom;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        onUpdate(courseId, updates);
+      }
+
+      pendingCommitRef.current.delete(courseId);
+    },
+    [onUpdate]
+  );
+
+  const applyScheduleChange = useCallback(
+    (courseId: string, partial: Partial<CourseSchedule>, mode: 'none' | 'deferred' | 'immediate') => {
+      const base = localSchedulesRef.current[courseId] ?? getScheduleFromCourse(courseMapRef.current.get(courseId));
+      const nextSchedule = normalizeSchedule({ ...base, ...partial });
+
+      setLocalSchedules(prev => {
+        const current = prev[courseId] ?? base;
+        if (areSchedulesEqual(current, nextSchedule)) {
+          return prev;
+        }
+        return { ...prev, [courseId]: nextSchedule };
+      });
+
+      if (mode === 'deferred') {
+        pendingCommitRef.current.add(courseId);
+      } else if (mode === 'immediate') {
+        pendingCommitRef.current.add(courseId);
+        commitSchedule(courseId, nextSchedule);
+      }
+    },
+    [commitSchedule]
+  );
+
+  useEffect(() => {
+    const pendingSet = pendingCommitRef.current;
+    return () => {
+      const pendingIds = Array.from(pendingSet);
+      pendingSet.clear();
+      pendingIds.forEach(courseId => {
+        commitSchedule(courseId);
+      });
+    };
+  }, [commitSchedule]);
+
+  const scheduleEntries = useMemo(
+    () =>
+      semesterCourses.map(course => ({
+        course,
+        schedule: localSchedules[course.id] ?? getScheduleFromCourse(course),
+      })),
+    [semesterCourses, localSchedules]
+  );
+
+  const scheduledEntries = useMemo(() => {
+    return scheduleEntries
+      .filter(({ schedule }) => schedule.scheduleDay && schedule.scheduleStartTime && schedule.scheduleEndTime)
+      .slice()
+      .sort((a, b) => {
+        const dayA = SCHEDULE_DAYS.indexOf((a.schedule.scheduleDay ?? '').toUpperCase() as (typeof SCHEDULE_DAYS)[number]);
+        const dayB = SCHEDULE_DAYS.indexOf((b.schedule.scheduleDay ?? '').toUpperCase() as (typeof SCHEDULE_DAYS)[number]);
+        if (dayA !== dayB) {
+          return dayA - dayB;
+        }
+        const startA = timeStringToMinutes(a.schedule.scheduleStartTime) ?? 0;
+        const startB = timeStringToMinutes(b.schedule.scheduleStartTime) ?? 0;
+        if (startA !== startB) {
+          return startA - startB;
+        }
+        return a.course.code.localeCompare(b.course.code);
+      });
+  }, [scheduleEntries]);
+
+  const unscheduledCourses = useMemo(
+    () =>
+      scheduleEntries
+        .filter(({ schedule }) => !schedule.scheduleDay || !schedule.scheduleStartTime || !schedule.scheduleEndTime)
+        .map(({ course }) => course)
+        .slice()
+        .sort((a, b) => a.code.localeCompare(b.code)),
+    [scheduleEntries]
+  );
+
+  const startInteraction = useCallback(
+    (courseId: string, type: InteractionState['type']) =>
+      (event: ReactMouseEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (disableInteractions || isCoursePending(courseId)) {
+          return;
+        }
+
+        const container = timelineRef.current;
+        const containerWidth = container?.getBoundingClientRect().width ?? 0;
+        const availableWidth = Math.max(containerWidth - DAY_COLUMN_WIDTH_PX, 520);
+        const cellWidth = availableWidth / TOTAL_SCHEDULE_HOURS;
+        const firstRow = container?.querySelector('[data-day-row]') as HTMLDivElement | null;
+        const rowHeight = firstRow?.getBoundingClientRect().height ?? ROW_HEIGHT_PX;
+
+        if (cellWidth <= 0) {
+          return;
+        }
+
+        pendingCommitRef.current.add(courseId);
+
+        if (type === 'move') {
+          setInteraction({
+            type: 'move',
+            courseId,
+            startX: event.clientX,
+            startY: event.clientY,
+            cellWidth,
+            rowHeight
+          });
+        } else {
+          setInteraction({
+            type: 'resize',
+            courseId,
+            startX: event.clientX,
+            cellWidth
+          });
+        }
+      },
+    [disableInteractions, isCoursePending]
+  );
+
+  useEffect(() => {
+    if (!interaction) {
+      return;
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      event.preventDefault();
+
+      if (disableInteractions) {
+        setInteraction(null);
+        return;
+      }
+
+      const course = courseMapRef.current.get(interaction.courseId);
+      const schedule = localSchedulesRef.current[interaction.courseId] ?? getScheduleFromCourse(course);
+      if (!course || !schedule.scheduleDay || !schedule.scheduleStartTime || !schedule.scheduleEndTime) {
+        return;
+      }
+
+      const cellWidth = interaction.cellWidth || 1;
+
+      if (interaction.type === 'move') {
+        const rowHeight = interaction.rowHeight || ROW_HEIGHT_PX;
+        const deltaX = event.clientX - interaction.startX;
+        const deltaY = event.clientY - interaction.startY;
+        const hoursDelta = deltaX / cellWidth;
+        const daysDelta = Math.round(deltaY / rowHeight);
+
+        const startOffset = timeToHourOffset(schedule.scheduleStartTime);
+        const endOffset = timeToHourOffset(schedule.scheduleEndTime);
+        const duration = Math.max(endOffset - startOffset, MIN_BLOCK_DURATION_HOURS);
+
+        const tentativeStart = clamp(startOffset + hoursDelta, 0, TOTAL_SCHEDULE_HOURS - duration);
+        const quantizedStart = Math.round(tentativeStart * 4) / 4;
+        const quantizedEnd = quantizedStart + duration;
+
+        const currentDayIndex = SCHEDULE_DAYS.indexOf(schedule.scheduleDay as (typeof SCHEDULE_DAYS)[number]);
+        const newDayIndex = clamp(currentDayIndex + daysDelta, 0, SCHEDULE_DAYS.length - 1);
+
+        if (
+          currentDayIndex !== newDayIndex ||
+          Math.abs(quantizedStart - startOffset) >= 0.01
+        ) {
+          applyScheduleChange(course.id, {
+            scheduleDay: SCHEDULE_DAYS[newDayIndex],
+            scheduleStartTime: hourOffsetToTime(quantizedStart),
+            scheduleEndTime: hourOffsetToTime(quantizedEnd)
+          }, 'deferred');
+          setInteraction(prev =>
+            prev && prev.type === 'move'
+              ? { ...prev, startX: event.clientX, startY: event.clientY }
+              : prev
+          );
+        }
+      } else if (interaction.type === 'resize') {
+        const deltaX = event.clientX - interaction.startX;
+        const hoursDelta = deltaX / cellWidth;
+        const startOffset = timeToHourOffset(schedule.scheduleStartTime);
+        const endOffset = timeToHourOffset(schedule.scheduleEndTime);
+        const tentativeEnd = clamp(
+          endOffset + hoursDelta,
+          startOffset + MIN_BLOCK_DURATION_HOURS,
+          TOTAL_SCHEDULE_HOURS
+        );
+        const quantizedEnd = Math.max(
+          Math.round(tentativeEnd * 4) / 4,
+          startOffset + MIN_BLOCK_DURATION_HOURS
+        );
+
+        if (Math.abs(quantizedEnd - endOffset) >= 0.01) {
+          applyScheduleChange(course.id, {
+            scheduleEndTime: hourOffsetToTime(quantizedEnd)
+          }, 'deferred');
+          setInteraction(prev =>
+            prev && prev.type === 'resize'
+              ? { ...prev, startX: event.clientX }
+              : prev
+          );
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (interaction?.courseId) {
+        commitSchedule(interaction.courseId);
+      }
+      setInteraction(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [interaction, disableInteractions, applyScheduleChange, commitSchedule]);
+
+  if (semesterCourses.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-6 space-y-4 rounded-lg border border-border/60 bg-muted/40 p-4">
+      <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+        <CalendarIcon className="h-5 w-5 text-primary" />
+        <span>
+          ตารางเรียน · ปี {year} เทอม {semester}
+        </span>
+      </div>
+
+      {unscheduledCourses.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border/40 bg-background/60 p-3 text-sm">
+          <span className="text-muted-foreground">วิชาที่ยังไม่ได้เพิ่ม:</span>
+          {unscheduledCourses.map(course => {
+            const pending = isCoursePending(course.id);
+            return (
+              <Button
+                key={course.id}
+                variant="outline"
+                size="sm"
+                disabled={disableInteractions || pending}
+                onClick={() => {
+                  applyScheduleChange(course.id, {
+                    scheduleDay: 'MON',
+                    scheduleStartTime: '09:00',
+                    scheduleEndTime: '11:00'
+                  }, 'none');
+                  onAddDefault(course.id);
+                }}
+              >
+                เพิ่ม {course.code || 'วิชาใหม่'}
+              </Button>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <div className="min-w-[900px]">
+          <div className="flex border-b border-border/60 bg-muted/60 text-xs font-semibold uppercase text-muted-foreground">
+            <div className="w-24 border-r border-border/40 px-3 py-2 text-center">Day / Time</div>
+            {SCHEDULE_HOURS.map(hour => (
+              <div
+                key={hour}
+                className="flex-1 border-r border-border/40 px-3 py-2 text-center"
+              >
+                {hour}:00
+              </div>
+            ))}
+          </div>
+
+          <div ref={timelineRef} className="relative">
+            {SCHEDULE_DAYS.map(day => (
+              <div
+                key={day}
+                data-day-row
+                className="flex h-[70px] border-b border-border/30 bg-background/40"
+              >
+                <div className="flex w-24 items-center justify-center border-r border-border/20 px-3 text-xs font-semibold uppercase text-muted-foreground">
+                  {day}
+                </div>
+                {SCHEDULE_HOURS.map(hour => (
+                  <div
+                    key={`${day}-${hour}`}
+                    className="flex-1 border-r border-border/20 bg-background/20"
+                  />
+                ))}
+              </div>
+            ))}
+
+            {scheduledEntries.map(({ course, schedule }, index) => {
+              const dayIndex = SCHEDULE_DAYS.indexOf(
+                (schedule.scheduleDay ?? '').toUpperCase() as (typeof SCHEDULE_DAYS)[number]
+              );
+              if (dayIndex < 0) {
+                return null;
+              }
+
+              const startOffset = timeToHourOffset(schedule.scheduleStartTime);
+              const endOffset = timeToHourOffset(schedule.scheduleEndTime);
+              const duration = Math.max(endOffset - startOffset, MIN_BLOCK_DURATION_HOURS);
+              const leftRatio = startOffset / TOTAL_SCHEDULE_HOURS;
+              const widthRatio = duration / TOTAL_SCHEDULE_HOURS;
+              const topPosition = dayIndex * ROW_HEIGHT_PX;
+              const pending = isCoursePending(course.id);
+              const blockDisabled = disableInteractions || pending;
+
+              return (
+                <div
+                  key={course.id}
+                  className={`absolute ${SCHEDULE_COLORS[index % SCHEDULE_COLORS.length]} text-white`
+                    .concat(' shadow-lg transition-opacity')
+                    .concat(blockDisabled ? ' opacity-60' : '')}
+                  style={{
+                    left: `calc(${DAY_COLUMN_WIDTH_PX}px + (100% - ${DAY_COLUMN_WIDTH_PX}px) * ${leftRatio})`,
+                    width: `calc((100% - ${DAY_COLUMN_WIDTH_PX}px) * ${widthRatio} - 6px)`,
+                    top: `${topPosition + 4}px`,
+                    height: `${ROW_HEIGHT_PX - 8}px`,
+                    zIndex: interaction?.courseId === course.id ? 30 : 10,
+                  }}
+                  onMouseDown={startInteraction(course.id, 'move')}
+                >
+                  <div className="flex h-full items-stretch gap-2 px-3 py-2 text-xs">
+                    <div className="flex-1 overflow-hidden">
+                      <div className="truncate text-sm font-semibold">
+                        {course.code || 'วิชา'}
+                      </div>
+                      <div className="truncate text-[11px] opacity-90">
+                        {course.nameTH || course.nameEN || 'ยังไม่ระบุชื่อ'}
+                      </div>
+                      <div className="mt-1 flex items-center gap-1 text-[10px] uppercase tracking-wide">
+                        <Clock className="h-3 w-3" />
+                        {schedule.scheduleStartTime} - {schedule.scheduleEndTime}
+                      </div>
+                      {schedule.scheduleRoom && (
+                        <div className="truncate text-[10px] opacity-90">
+                          ห้อง {schedule.scheduleRoom}
+                        </div>
+                      )}
+                    </div>
+                    <div
+                      role="presentation"
+                      className="w-2 cursor-ew-resize rounded-full bg-white/30 hover:bg-white/60"
+                      onMouseDown={startInteraction(course.id, 'resize')}
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-white/80 text-rose-600 shadow hover:bg-rose-600 hover:text-white"
+                      onClick={event => {
+                        event.stopPropagation();
+                        pendingCommitRef.current.delete(course.id);
+                        applyScheduleChange(course.id, emptySchedule, 'none');
+                        onClear(course.id);
+                      }}
+                      disabled={blockDisabled}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3 rounded-md border border-border/40 bg-background/80 p-4">
+        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Clock className="h-4 w-4 text-primary" />
+          <span>ปรับวัน / เวลา / ห้องเรียน</span>
+        </div>
+
+        {scheduledEntries.length === 0 && (
+          <div className="rounded-md border border-dashed border-border/30 bg-muted/40 py-4 text-center text-xs text-muted-foreground">
+            ยังไม่มีวิชาในตาราง กดปุ่ม “เพิ่ม” เพื่อเริ่มกำหนดเวลาเรียน
+          </div>
+        )}
+
+        {scheduledEntries.map(({ course, schedule }) => {
+          const pending = isCoursePending(course.id);
+          const disabled = disableInteractions || pending;
+          return (
+            <div
+              key={`form-${course.id}`}
+              className="grid gap-2 text-sm md:grid-cols-[minmax(0,1fr)_110px_110px_110px_minmax(0,1fr)_40px]"
+            >
+              <div className="truncate font-semibold text-foreground">
+                {course.code || 'วิชาใหม่'}
+              </div>
+              <select
+                className="rounded-md border border-border/50 bg-background px-2 py-1 text-xs"
+                value={schedule.scheduleDay ?? 'MON'}
+                onChange={event =>
+                  applyScheduleChange(course.id, { scheduleDay: event.target.value }, 'immediate')
+                }
+                disabled={disabled}
+              >
+                {SCHEDULE_DAYS.map(day => (
+                  <option key={day} value={day}>
+                    {day}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="time"
+                step={900}
+                className="rounded-md border border-border/50 bg-background px-2 py-1 text-xs"
+                value={schedule.scheduleStartTime ?? '09:00'}
+                onChange={event =>
+                  applyScheduleChange(course.id, { scheduleStartTime: event.target.value }, 'immediate')
+                }
+                disabled={disabled}
+              />
+              <input
+                type="time"
+                step={900}
+                className="rounded-md border border-border/50 bg-background px-2 py-1 text-xs"
+                value={schedule.scheduleEndTime ?? '11:00'}
+                onChange={event =>
+                  applyScheduleChange(course.id, { scheduleEndTime: event.target.value }, 'immediate')
+                }
+                disabled={disabled}
+              />
+              <input
+                type="text"
+                className="rounded-md border border-border/50 bg-background px-2 py-1 text-xs"
+                placeholder="ห้องเรียน"
+                value={schedule.scheduleRoom ?? ''}
+                onChange={event =>
+                  applyScheduleChange(course.id, { scheduleRoom: event.target.value }, 'deferred')
+                }
+                onBlur={() => commitSchedule(course.id)}
+                disabled={disabled}
+              />
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="justify-self-end text-destructive hover:text-destructive"
+                onClick={() => {
+                  pendingCommitRef.current.delete(course.id);
+                  applyScheduleChange(course.id, emptySchedule, 'none');
+                  onClear(course.id);
+                }}
+                disabled={disabled}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 export default function CourseTracker({ userEmail }: CourseTrackerProps) {
   const router = useRouter();
@@ -293,7 +1079,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
   const isCoursePending = (courseId: string) => Boolean(pendingMap[courseId]);
 
   const unsavedCourseIds = useMemo(() => {
-    const originalMap = new Map(originalCourses.map(course => [course.id, course]));
+    const originalMap = new Map(originalCourses.map(course => [course.id, sanitizeCourse(course)]));
     const unsaved = new Set<string>();
 
     courses.forEach(course => {
@@ -312,7 +1098,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
   }, [courses, originalCourses]);
 
   const stagedSummary = useMemo(() => {
-    const originalMap = new Map(originalCourses.map(course => [course.id, course]));
+    const originalMap = new Map(originalCourses.map(course => [course.id, sanitizeCourse(course)]));
     let newCount = 0;
     let updatedCount = 0;
 
@@ -354,6 +1140,10 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
         courseType: '',
         completed: false,
         position: nextPosition,
+        scheduleDay: null,
+        scheduleStartTime: null,
+        scheduleEndTime: null,
+        scheduleRoom: null,
         isDraft: true
       };
       return sortCourses([...prev, newCourse]);
@@ -457,6 +1247,140 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
     }
   };
 
+  const updateCourseSchedule = useCallback(
+    (courseId: string, update: ScheduleUpdate) => {
+      if (!update || Object.keys(update).length === 0) {
+        return;
+      }
+
+      setCourses(prevCourses =>
+        prevCourses.map(course => {
+          if (course.id !== courseId) {
+            return course;
+          }
+
+          const next = { ...course };
+          (Object.entries(update) as Array<[ScheduleFieldKey, string | null | undefined]>).forEach(([key, value]) => {
+            if (value === undefined) {
+              return;
+            }
+
+            if (value === null) {
+              switch (key) {
+                case 'scheduleDay':
+                  next.scheduleDay = null;
+                  break;
+                case 'scheduleStartTime':
+                  next.scheduleStartTime = null;
+                  break;
+                case 'scheduleEndTime':
+                  next.scheduleEndTime = null;
+                  break;
+                case 'scheduleRoom':
+                  next.scheduleRoom = null;
+                  break;
+                default:
+                  break;
+              }
+              return;
+            }
+
+            const trimmed = value.trim();
+            if (!trimmed) {
+              switch (key) {
+                case 'scheduleDay':
+                  next.scheduleDay = null;
+                  break;
+                case 'scheduleStartTime':
+                  next.scheduleStartTime = null;
+                  break;
+                case 'scheduleEndTime':
+                  next.scheduleEndTime = null;
+                  break;
+                case 'scheduleRoom':
+                  next.scheduleRoom = null;
+                  break;
+                default:
+                  break;
+              }
+              return;
+            }
+
+            switch (key) {
+              case 'scheduleDay':
+                next.scheduleDay = trimmed.toUpperCase();
+                break;
+              case 'scheduleStartTime':
+                next.scheduleStartTime = trimmed;
+                break;
+              case 'scheduleEndTime':
+                next.scheduleEndTime = trimmed;
+                break;
+              case 'scheduleRoom':
+                next.scheduleRoom = trimmed;
+                break;
+              default:
+                break;
+            }
+          });
+
+          const startMinutes = timeStringToMinutes(next.scheduleStartTime);
+          const endMinutes = timeStringToMinutes(next.scheduleEndTime);
+
+          if (startMinutes !== null) {
+            const maxStart = TOTAL_SCHEDULE_MINUTES - MIN_BLOCK_DURATION_HOURS * 60;
+            const normalizedStart = clamp(startMinutes, 0, Math.max(0, maxStart));
+            next.scheduleStartTime = minutesToTime(normalizedStart);
+          }
+
+          const currentStartMinutes = timeStringToMinutes(next.scheduleStartTime);
+          if (currentStartMinutes !== null) {
+            const minimalEnd = currentStartMinutes + MIN_BLOCK_DURATION_HOURS * 60;
+            if (endMinutes === null) {
+              const fallbackEnd = clamp(minimalEnd, MIN_BLOCK_DURATION_HOURS * 60, TOTAL_SCHEDULE_MINUTES);
+              next.scheduleEndTime = minutesToTime(fallbackEnd);
+            } else {
+              const normalizedEnd = clamp(Math.max(endMinutes, minimalEnd), MIN_BLOCK_DURATION_HOURS * 60, TOTAL_SCHEDULE_MINUTES);
+              next.scheduleEndTime = minutesToTime(normalizedEnd);
+            }
+          } else if (endMinutes !== null) {
+            const maxStart = TOTAL_SCHEDULE_MINUTES - MIN_BLOCK_DURATION_HOURS * 60;
+            const derivedStart = clamp(endMinutes - MIN_BLOCK_DURATION_HOURS * 60, 0, Math.max(0, maxStart));
+            next.scheduleStartTime = minutesToTime(derivedStart);
+            const normalizedEnd = clamp(endMinutes, derivedStart + MIN_BLOCK_DURATION_HOURS * 60, TOTAL_SCHEDULE_MINUTES);
+            next.scheduleEndTime = minutesToTime(normalizedEnd);
+          }
+
+          return next;
+        })
+      );
+    },
+    [setCourses]
+  );
+
+  const applyDefaultSchedule = useCallback(
+    (courseId: string) => {
+      updateCourseSchedule(courseId, {
+        scheduleDay: 'MON',
+        scheduleStartTime: '09:00',
+        scheduleEndTime: '11:00',
+      });
+    },
+    [updateCourseSchedule]
+  );
+
+  const clearCourseSchedule = useCallback(
+    (courseId: string) => {
+      updateCourseSchedule(courseId, {
+        scheduleDay: null,
+        scheduleStartTime: null,
+        scheduleEndTime: null,
+        scheduleRoom: null,
+      });
+    },
+    [updateCourseSchedule]
+  );
+
   const handleLogout = useCallback(async () => {
     if (isLoggingOut || isSaving) {
       return;
@@ -512,7 +1436,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
     const sanitizedCourses = courses.map(sanitizeCourse);
     setCourses(sanitizedCourses);
 
-    const originalMap = new Map(originalCourses.map(course => [course.id, course]));
+    const originalMap = new Map(originalCourses.map(course => [course.id, sanitizeCourse(course)]));
     const draftCourses: Course[] = [];
     const updates: Array<{ course: Course; payload: UpdateUserCoursePayload }> = [];
 
@@ -570,6 +1494,26 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
 
       if (Object.keys(coursePayload).length > 0) {
         payload.course = coursePayload;
+      }
+
+      if ((course.scheduleDay ?? null) !== (original.scheduleDay ?? null)) {
+        payload.scheduleDay = course.scheduleDay ?? null;
+        changed = true;
+      }
+
+      if ((course.scheduleStartTime ?? null) !== (original.scheduleStartTime ?? null)) {
+        payload.scheduleStartTime = course.scheduleStartTime ?? null;
+        changed = true;
+      }
+
+      if ((course.scheduleEndTime ?? null) !== (original.scheduleEndTime ?? null)) {
+        payload.scheduleEndTime = course.scheduleEndTime ?? null;
+        changed = true;
+      }
+
+      if ((course.scheduleRoom ?? null) !== (original.scheduleRoom ?? null)) {
+        payload.scheduleRoom = course.scheduleRoom ?? null;
+        changed = true;
       }
 
       if (changed) {
@@ -1213,6 +2157,17 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                           ยังไม่มีวิชาในเทอมนี้ กดปุ่ม &quot;เพิ่มวิชาในเทอมนี้&quot; เพื่อเริ่มต้น
                         </div>
                       )}
+
+                      <ScheduleBuilder
+                        year={year}
+                        semester={semester}
+                        courses={semesterCourses}
+                        disableInteractions={isSaving || isLoggingOut}
+                        isCoursePending={isCoursePending}
+                        onAddDefault={applyDefaultSchedule}
+                        onUpdate={updateCourseSchedule}
+                        onClear={clearCourseSchedule}
+                      />
                     </div>
                   );
                 })}
