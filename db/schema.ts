@@ -111,6 +111,30 @@ export const userCourses = pgTable(
   })
 );
 
+// Additional meetings per user course (for multi-day schedules)
+export const userCourseMeetings = pgTable(
+  "user_course_meetings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userCourseId: uuid("user_course_id")
+      .notNull()
+      .references(() => userCourses.id, { onDelete: "cascade" }),
+    day: text("day"),
+    startTime: text("start_time"),
+    endTime: text("end_time"),
+    room: text("room"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .default(sql`now()`),
+  },
+  table => ({
+    userCourseIdx: index("user_course_meetings_course_idx").on(table.userCourseId),
+  })
+);
+
 export const coursesRelations = relations(courses, ({ many }) => ({
   userCourses: many(userCourses),
 }));
@@ -126,6 +150,13 @@ export const userCoursesRelations = relations(userCourses, ({ one }) => ({
   }),
 }));
 
+export const userCourseMeetingsRelations = relations(userCourseMeetings, ({ one }) => ({
+  userCourse: one(userCourses, {
+    fields: [userCourseMeetings.userCourseId],
+    references: [userCourses.id],
+  }),
+}));
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -134,3 +165,5 @@ export type Course = typeof courses.$inferSelect;
 export type NewCourse = typeof courses.$inferInsert;
 export type UserCourse = typeof userCourses.$inferSelect;
 export type NewUserCourse = typeof userCourses.$inferInsert;
+export type UserCourseMeeting = typeof userCourseMeetings.$inferSelect;
+export type NewUserCourseMeeting = typeof userCourseMeetings.$inferInsert;

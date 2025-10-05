@@ -1,10 +1,12 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import {
   courses,
   type Course,
   type UserCourse,
   userCourses,
+  userCourseMeetings,
+  type UserCourseMeeting,
 } from "@/db/schema";
 import { db } from "@/lib/db";
 
@@ -58,6 +60,30 @@ export type UpdateUserCourseInput = {
   scheduleStartTime?: string | null;
   scheduleEndTime?: string | null;
   scheduleRoom?: string | null;
+};
+
+export type UserCourseMeetingRecord = {
+  meetingId: string;
+  userCourseId: string;
+  day: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  room: string | null;
+};
+
+export type CreateUserCourseMeetingInput = {
+  userCourseId: string;
+  day?: string;
+  startTime?: string;
+  endTime?: string;
+  room?: string;
+};
+
+export type UpdateUserCourseMeetingInput = {
+  day?: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  room?: string | null;
 };
 
 function mapRow(row: {
@@ -128,6 +154,161 @@ export async function getUserCoursePlan(userId: string): Promise<UserCourseRecor
     );
 
   return rows.map(mapRow);
+}
+
+export async function getUserCourseMeetings(
+  userCourseIds: string[]
+): Promise<Record<string, UserCourseMeetingRecord[]>> {
+  if (userCourseIds.length === 0) {
+    return {};
+  }
+  const rows = await db
+    .select({
+      id: userCourseMeetings.id,
+      userCourseId: userCourseMeetings.userCourseId,
+      day: userCourseMeetings.day,
+      startTime: userCourseMeetings.startTime,
+      endTime: userCourseMeetings.endTime,
+      room: userCourseMeetings.room,
+    })
+    .from(userCourseMeetings)
+    .where(inArray(userCourseMeetings.userCourseId, userCourseIds));
+
+  const map: Record<string, UserCourseMeetingRecord[]> = {};
+  rows.forEach(row => {
+    const list = map[row.userCourseId] || (map[row.userCourseId] = []);
+    list.push({
+      meetingId: row.id,
+      userCourseId: row.userCourseId,
+      day: row.day ?? null,
+      startTime: row.startTime ?? null,
+      endTime: row.endTime ?? null,
+      room: row.room ?? null,
+    });
+  });
+  return map;
+}
+
+export async function createUserCourseMeeting(
+  input: CreateUserCourseMeetingInput
+): Promise<UserCourseMeetingRecord> {
+  // Ensure the parent user course exists
+  const [existingCourse] = await db
+    .select({ id: userCourses.id })
+    .from(userCourses)
+    .where(eq(userCourses.id, input.userCourseId))
+    .limit(1);
+  if (!existingCourse) {
+    throw new Error("User course not found");
+  }
+
+  const [created] = await db
+    .insert(userCourseMeetings)
+    .values({
+      userCourseId: input.userCourseId,
+      day: input.day?.trim() || null,
+      startTime: input.startTime?.trim() || null,
+      endTime: input.endTime?.trim() || null,
+      room: input.room?.trim() || null,
+    })
+    .returning();
+
+  if (!created) {
+    throw new Error("Failed to create meeting");
+  }
+
+  return {
+    meetingId: created.id,
+    userCourseId: created.userCourseId,
+    day: created.day ?? null,
+    startTime: created.startTime ?? null,
+    endTime: created.endTime ?? null,
+    room: created.room ?? null,
+  };
+}
+
+export async function updateUserCourseMeeting(
+  userCourseId: string,
+  meetingId: string,
+  input: UpdateUserCourseMeetingInput
+): Promise<UserCourseMeetingRecord> {
+  const [existing] = await db
+    .select({
+      meeting: userCourseMeetings,
+    })
+    .from(userCourseMeetings)
+    .where(and(eq(userCourseMeetings.id, meetingId), eq(userCourseMeetings.userCourseId, userCourseId)))
+    .limit(1);
+
+  if (!existing) {
+    throw new Error("Meeting not found");
+  }
+
+  const updates: Partial<UserCourseMeeting> = {};
+  if (typeof input.day === "string") {
+    const trimmed = input.day.trim();
+    updates.day = trimmed || null;
+  } else if (input.day === null) {
+    updates.day = null;
+  }
+  if (typeof input.startTime === "string") {
+    const trimmed = input.startTime.trim();
+    updates.startTime = trimmed || null;
+  } else if (input.startTime === null) {
+    updates.startTime = null;
+  }
+  if (typeof input.endTime === "string") {
+    const trimmed = input.endTime.trim();
+    updates.endTime = trimmed || null;
+  } else if (input.endTime === null) {
+    updates.endTime = null;
+  }
+  if (typeof input.room === "string") {
+    const trimmed = input.room.trim();
+    updates.room = trimmed || null;
+  } else if (input.room === null) {
+    updates.room = null;
+  }
+
+  if (Object.keys(updates).length > 0) {
+    updates.updatedAt = new Date();
+    await db
+      .update(userCourseMeetings)
+      .set(updates)
+      .where(and(eq(userCourseMeetings.id, meetingId), eq(userCourseMeetings.userCourseId, userCourseId)));
+  }
+
+  const [updated] = await db
+    .select({
+      id: userCourseMeetings.id,
+      userCourseId: userCourseMeetings.userCourseId,
+      day: userCourseMeetings.day,
+      startTime: userCourseMeetings.startTime,
+      endTime: userCourseMeetings.endTime,
+      room: userCourseMeetings.room,
+    })
+    .from(userCourseMeetings)
+    .where(eq(userCourseMeetings.id, meetingId))
+    .limit(1);
+
+  if (!updated) {
+    throw new Error("Failed to load updated meeting");
+  }
+
+  return {
+    meetingId: updated.id,
+    userCourseId: updated.userCourseId,
+    day: updated.day ?? null,
+    startTime: updated.startTime ?? null,
+    endTime: updated.endTime ?? null,
+    room: updated.room ?? null,
+  };
+}
+
+export async function deleteUserCourseMeeting(userCourseId: string, meetingId: string): Promise<void> {
+  await db
+    .delete(userCourseMeetings)
+    .where(and(eq(userCourseMeetings.id, meetingId), eq(userCourseMeetings.userCourseId, userCourseId)));
 }
 
 async function ensureCourse(input: {

@@ -3,11 +3,16 @@ import { NextResponse } from "next/server";
 import {
   createUserCourse,
   getUserCoursePlan,
+  getUserCourseMeetings,
   type UserCourseRecord,
+  type UserCourseMeetingRecord,
 } from "@/lib/course-service";
 import { readUserFromSessionCookie } from "@/lib/auth";
 
-function toApiShape(record: UserCourseRecord) {
+function toApiShape(
+  record: UserCourseRecord,
+  meetings?: UserCourseMeetingRecord[]
+) {
   return {
     id: record.userCourseId,
     courseId: record.courseId,
@@ -24,6 +29,13 @@ function toApiShape(record: UserCourseRecord) {
     scheduleStartTime: record.scheduleStartTime ?? "",
     scheduleEndTime: record.scheduleEndTime ?? "",
     scheduleRoom: record.scheduleRoom ?? "",
+    meetings: (meetings ?? []).map(m => ({
+      id: m.meetingId,
+      day: m.day ?? "",
+      startTime: m.startTime ?? "",
+      endTime: m.endTime ?? "",
+      room: m.room ?? "",
+    })),
   };
 }
 
@@ -38,7 +50,9 @@ export async function GET() {
   }
 
   const records = await getUserCoursePlan(user.id);
-  return NextResponse.json({ courses: records.map(toApiShape) });
+  const meetingMap = await getUserCourseMeetings(records.map(r => r.userCourseId));
+  const result = records.map(r => toApiShape(r, meetingMap[r.userCourseId]));
+  return NextResponse.json({ courses: result });
 }
 
 type CreatePayload = {

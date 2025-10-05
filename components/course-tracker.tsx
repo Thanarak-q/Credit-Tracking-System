@@ -62,9 +62,13 @@ import {
   deleteUserCourseApi,
   fetchUserCourses,
   updateUserCourseApi,
+  createUserCourseMeetingApi,
+  updateUserCourseMeetingApi,
+  deleteUserCourseMeetingApi,
   type CreateUserCoursePayload,
   type UserCourseDto,
-  type UpdateUserCoursePayload
+  type UpdateUserCoursePayload,
+  type UserCourseMeetingDto
 } from '@/lib/user-course-api';
 
 type Course = {
@@ -83,6 +87,13 @@ type Course = {
   scheduleStartTime: string | null;
   scheduleEndTime: string | null;
   scheduleRoom: string | null;
+  meetings: Array<{
+    id: string;
+    day: string | null;
+    startTime: string | null;
+    endTime: string | null;
+    room: string | null;
+  }>;
   isDraft?: boolean;
 };
 
@@ -318,6 +329,15 @@ const mapDtoToCourse = (dto: UserCourseDto): Course => ({
   scheduleStartTime: dto.scheduleStartTime || null,
   scheduleEndTime: dto.scheduleEndTime || null,
   scheduleRoom: dto.scheduleRoom ? dto.scheduleRoom : null,
+  meetings: Array.isArray(dto.meetings)
+    ? dto.meetings.map((m: UserCourseMeetingDto) => ({
+        id: m.id,
+        day: m.day ? m.day.toUpperCase() : null,
+        startTime: m.startTime || null,
+        endTime: m.endTime || null,
+        room: m.room || null,
+      }))
+    : [],
   isDraft: false
 });
 
@@ -426,6 +446,7 @@ const buildEmptyCompletedBuckets = () =>
 type InteractionState =
   | {
       type: 'move';
+      entryKey: string;
       courseId: string;
       startX: number;
       startY: number;
@@ -434,6 +455,7 @@ type InteractionState =
     }
   | {
       type: 'resize';
+      entryKey: string;
       courseId: string;
       startX: number;
       cellWidth: number;
@@ -446,8 +468,11 @@ type ScheduleBuilderProps = {
   disableInteractions: boolean;
   isCoursePending: (courseId: string) => boolean;
   onAddDefault: (courseId: string) => void;
+  onAddMeetingDefault: (courseId: string) => void;
   onUpdate: (courseId: string, update: ScheduleUpdate) => void;
+  onUpdateMeeting: (courseId: string, meetingId: string, update: ScheduleUpdate) => void;
   onClear: (courseId: string) => void;
+  onClearMeeting: (courseId: string, meetingId: string) => void;
 };
 
 const ScheduleBuilder = ({
@@ -457,8 +482,11 @@ const ScheduleBuilder = ({
   disableInteractions,
   isCoursePending,
   onAddDefault,
+  onAddMeetingDefault,
   onUpdate,
-  onClear
+  onUpdateMeeting,
+  onClear,
+  onClearMeeting
 }: ScheduleBuilderProps) => {
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const [interaction, setInteraction] = useState<InteractionState | null>(null);
@@ -469,13 +497,49 @@ const ScheduleBuilder = ({
     [courses, year, semester]
   );
 
+  const buildEntryKey = (courseId: string, kind: 'inline' | 'meeting', meetingId?: string) =>
+    kind === 'inline' ? `${courseId}::inline` : `${courseId}::meeting::${meetingId ?? ''}`;
+
+  type ScheduleEntry = {
+    key: string;
+    course: Course;
+    kind: 'inline' | 'meeting';
+    meetingId?: string;
+    schedule: CourseSchedule;
+  };
+
+  const getEntriesForCourse = (course: Course): ScheduleEntry[] => {
+    const entries: ScheduleEntry[] = [];
+    const inline = getScheduleFromCourse(course);
+    if (!areSchedulesEqual(inline, emptySchedule)) {
+      entries.push({ key: buildEntryKey(course.id, 'inline'), course, kind: 'inline', schedule: inline });
+    }
+    course.meetings.forEach(m => {
+      const schedule: CourseSchedule = {
+        scheduleDay: m.day ?? null,
+        scheduleStartTime: m.startTime ?? null,
+        scheduleEndTime: m.endTime ?? null,
+        scheduleRoom: m.room ?? null,
+      };
+      if (!areSchedulesEqual(schedule, emptySchedule)) {
+        entries.push({
+          key: buildEntryKey(course.id, 'meeting', m.id),
+          course,
+          kind: 'meeting',
+          meetingId: m.id,
+          schedule,
+        });
+      }
+    });
+    return entries;
+  };
+
   const [localSchedules, setLocalSchedules] = useState<Record<string, CourseSchedule>>(() => {
     const initial: Record<string, CourseSchedule> = {};
     semesterCourses.forEach(course => {
-      const snapshot = getScheduleFromCourse(course);
-      if (!areSchedulesEqual(snapshot, emptySchedule)) {
-        initial[course.id] = snapshot;
-      }
+      getEntriesForCourse(course).forEach(entry => {
+        initial[entry.key] = entry.schedule;
+      });
     });
     return initial;
   });
@@ -497,32 +561,28 @@ const ScheduleBuilder = ({
     setLocalSchedules(prev => {
       let changed = false;
       const next: Record<string, CourseSchedule> = { ...prev };
-      const courseIds = new Set<string>();
+      const validKeys = new Set<string>();
 
       semesterCourses.forEach(course => {
-        courseIds.add(course.id);
-        const canonical = getScheduleFromCourse(course);
-        const existing = prev[course.id];
-
-        if (!existing && !areSchedulesEqual(canonical, emptySchedule)) {
-          next[course.id] = canonical;
-          changed = true;
-          return;
-        }
-
-        if (existing && areSchedulesEqual(existing, canonical)) {
-          return;
-        }
-
-        if (!pendingCommitRef.current.has(course.id)) {
-          next[course.id] = canonical;
-          changed = true;
-        }
+        const entries = getEntriesForCourse(course);
+        entries.forEach(entry => {
+          validKeys.add(entry.key);
+          const existing = prev[entry.key];
+          if (!existing) {
+            next[entry.key] = entry.schedule;
+            changed = true;
+            return;
+          }
+          if (!areSchedulesEqual(existing, entry.schedule) && !pendingCommitRef.current.has(entry.key)) {
+            next[entry.key] = entry.schedule;
+            changed = true;
+          }
+        });
       });
 
-      Object.keys(next).forEach(id => {
-        if (!courseIds.has(id)) {
-          delete next[id];
+      Object.keys(next).forEach(key => {
+        if (!validKeys.has(key)) {
+          delete next[key];
           changed = true;
         }
       });
@@ -532,23 +592,36 @@ const ScheduleBuilder = ({
   }, [semesterCourses]);
 
   const commitSchedule = useCallback(
-    (courseId: string, scheduleOverride?: CourseSchedule) => {
+    (entryKey: string, scheduleOverride?: CourseSchedule) => {
+      const [courseId, kind, _m, meetingId] = entryKey.split("::");
       const course = courseMapRef.current.get(courseId);
       if (!course) {
-        pendingCommitRef.current.delete(courseId);
+        pendingCommitRef.current.delete(entryKey);
         return;
       }
 
-      const local = scheduleOverride ?? localSchedulesRef.current[courseId];
+      const local = scheduleOverride ?? localSchedulesRef.current[entryKey];
       if (!local) {
-        pendingCommitRef.current.delete(courseId);
+        pendingCommitRef.current.delete(entryKey);
         return;
       }
 
       const normalized = normalizeSchedule(local);
-      const current = getScheduleFromCourse(course);
-      const updates: ScheduleUpdate = {};
+      const current: CourseSchedule = kind === 'inline'
+        ? getScheduleFromCourse(course)
+        : (() => {
+            const m = course.meetings.find(x => x.id === (meetingId ?? ''));
+            return m
+              ? {
+                  scheduleDay: m.day ?? null,
+                  scheduleStartTime: m.startTime ?? null,
+                  scheduleEndTime: m.endTime ?? null,
+                  scheduleRoom: m.room ?? null,
+                }
+              : emptySchedule;
+          })();
 
+      const updates: ScheduleUpdate = {};
       if (normalized.scheduleDay !== current.scheduleDay) {
         updates.scheduleDay = normalized.scheduleDay;
       }
@@ -563,32 +636,52 @@ const ScheduleBuilder = ({
       }
 
       if (Object.keys(updates).length > 0) {
-        onUpdate(courseId, updates);
+        if (kind === 'inline') {
+          onUpdate(courseId, updates);
+        } else if (meetingId) {
+          onUpdateMeeting(courseId, meetingId, updates);
+        }
       }
 
-      pendingCommitRef.current.delete(courseId);
+      pendingCommitRef.current.delete(entryKey);
     },
-    [onUpdate]
+    [onUpdate, onUpdateMeeting]
   );
 
   const applyScheduleChange = useCallback(
-    (courseId: string, partial: Partial<CourseSchedule>, mode: 'none' | 'deferred' | 'immediate') => {
-      const base = localSchedulesRef.current[courseId] ?? getScheduleFromCourse(courseMapRef.current.get(courseId));
+    (entryKey: string, partial: Partial<CourseSchedule>, mode: 'none' | 'deferred' | 'immediate') => {
+      const [courseId, kind, _m, meetingId] = entryKey.split("::");
+      const course = courseMapRef.current.get(courseId);
+      const base: CourseSchedule =
+        localSchedulesRef.current[entryKey] ??
+        (kind === 'inline'
+          ? getScheduleFromCourse(course)
+          : (() => {
+              const m = course?.meetings.find(x => x.id === (meetingId ?? ''));
+              return m
+                ? {
+                    scheduleDay: m.day ?? null,
+                    scheduleStartTime: m.startTime ?? null,
+                    scheduleEndTime: m.endTime ?? null,
+                    scheduleRoom: m.room ?? null,
+                  }
+                : emptySchedule;
+            })());
       const nextSchedule = normalizeSchedule({ ...base, ...partial });
 
       setLocalSchedules(prev => {
-        const current = prev[courseId] ?? base;
+        const current = prev[entryKey] ?? base;
         if (areSchedulesEqual(current, nextSchedule)) {
           return prev;
         }
-        return { ...prev, [courseId]: nextSchedule };
+        return { ...prev, [entryKey]: nextSchedule };
       });
 
       if (mode === 'deferred') {
-        pendingCommitRef.current.add(courseId);
+        pendingCommitRef.current.add(entryKey);
       } else if (mode === 'immediate') {
-        pendingCommitRef.current.add(courseId);
-        commitSchedule(courseId, nextSchedule);
+        pendingCommitRef.current.add(entryKey);
+        commitSchedule(entryKey, nextSchedule);
       }
     },
     [commitSchedule]
@@ -599,20 +692,35 @@ const ScheduleBuilder = ({
     return () => {
       const pendingIds = Array.from(pendingSet);
       pendingSet.clear();
-      pendingIds.forEach(courseId => {
-        commitSchedule(courseId);
+      pendingIds.forEach(key => {
+        commitSchedule(key);
       });
     };
   }, [commitSchedule]);
 
-  const scheduleEntries = useMemo(
-    () =>
-      semesterCourses.map(course => ({
-        course,
-        schedule: localSchedules[course.id] ?? getScheduleFromCourse(course),
-      })),
-    [semesterCourses, localSchedules]
-  );
+  const scheduleEntries = useMemo<ScheduleEntry[]>(() => {
+    const list: ScheduleEntry[] = [];
+    semesterCourses.forEach(course => {
+      const inlineKey = buildEntryKey(course.id, 'inline');
+      const inline = localSchedules[inlineKey] ?? getScheduleFromCourse(course);
+      if (!areSchedulesEqual(inline, emptySchedule)) {
+        list.push({ key: inlineKey, course, kind: 'inline', schedule: inline });
+      }
+      course.meetings.forEach(m => {
+        const key = buildEntryKey(course.id, 'meeting', m.id);
+        const schedule: CourseSchedule = localSchedules[key] ?? {
+          scheduleDay: m.day ?? null,
+          scheduleStartTime: m.startTime ?? null,
+          scheduleEndTime: m.endTime ?? null,
+          scheduleRoom: m.room ?? null,
+        };
+        if (!areSchedulesEqual(schedule, emptySchedule)) {
+          list.push({ key, course, kind: 'meeting', meetingId: m.id, schedule });
+        }
+      });
+    });
+    return list;
+  }, [semesterCourses, localSchedules]);
 
   const scheduledEntries = useMemo(() => {
     return scheduleEntries
@@ -644,7 +752,7 @@ const ScheduleBuilder = ({
   );
 
   const startInteraction = useCallback(
-    (courseId: string, type: InteractionState['type']) =>
+    (entryKey: string, courseId: string, type: InteractionState['type']) =>
       (event: ReactMouseEvent<HTMLDivElement>) => {
         event.preventDefault();
         event.stopPropagation();
@@ -664,11 +772,12 @@ const ScheduleBuilder = ({
           return;
         }
 
-        pendingCommitRef.current.add(courseId);
+        pendingCommitRef.current.add(entryKey);
 
         if (type === 'move') {
           setInteraction({
             type: 'move',
+            entryKey,
             courseId,
             startX: event.clientX,
             startY: event.clientY,
@@ -678,6 +787,7 @@ const ScheduleBuilder = ({
         } else {
           setInteraction({
             type: 'resize',
+            entryKey,
             courseId,
             startX: event.clientX,
             cellWidth
@@ -701,7 +811,7 @@ const ScheduleBuilder = ({
       }
 
       const course = courseMapRef.current.get(interaction.courseId);
-      const schedule = localSchedulesRef.current[interaction.courseId] ?? getScheduleFromCourse(course);
+      const schedule = localSchedulesRef.current[interaction.entryKey] ?? getScheduleFromCourse(course);
       if (!course || !schedule.scheduleDay || !schedule.scheduleStartTime || !schedule.scheduleEndTime) {
         return;
       }
@@ -730,7 +840,7 @@ const ScheduleBuilder = ({
           currentDayIndex !== newDayIndex ||
           Math.abs(quantizedStart - startOffset) >= 0.01
         ) {
-          applyScheduleChange(course.id, {
+          applyScheduleChange(interaction.entryKey, {
             scheduleDay: SCHEDULE_DAYS[newDayIndex],
             scheduleStartTime: hourOffsetToTime(quantizedStart),
             scheduleEndTime: hourOffsetToTime(quantizedEnd)
@@ -757,7 +867,7 @@ const ScheduleBuilder = ({
         );
 
         if (Math.abs(quantizedEnd - endOffset) >= 0.01) {
-          applyScheduleChange(course.id, {
+          applyScheduleChange(interaction.entryKey, {
             scheduleEndTime: hourOffsetToTime(quantizedEnd)
           }, 'deferred');
           setInteraction(prev =>
@@ -770,8 +880,8 @@ const ScheduleBuilder = ({
     };
 
     const handleMouseUp = () => {
-      if (interaction?.courseId) {
-        commitSchedule(interaction.courseId);
+      if (interaction?.entryKey) {
+        commitSchedule(interaction.entryKey);
       }
       setInteraction(null);
     };
@@ -798,10 +908,10 @@ const ScheduleBuilder = ({
         </span>
       </div>
 
-      {unscheduledCourses.length > 0 && (
+      {semesterCourses.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border/40 bg-background/60 p-3 text-sm">
-          <span className="text-muted-foreground">วิชาที่ยังไม่ได้เพิ่ม:</span>
-          {unscheduledCourses.map(course => {
+          <span className="text-muted-foreground">เพิ่มเวลาให้วิชา:</span>
+          {semesterCourses.map(course => {
             const pending = isCoursePending(course.id);
             return (
               <Button
@@ -810,12 +920,18 @@ const ScheduleBuilder = ({
                 size="sm"
                 disabled={disableInteractions || pending}
                 onClick={() => {
-                  applyScheduleChange(course.id, {
-                    scheduleDay: 'MON',
-                    scheduleStartTime: '09:00',
-                    scheduleEndTime: '11:00'
-                  }, 'none');
-                  onAddDefault(course.id);
+                  const hasAny = scheduleEntries.some(e => e.course.id === course.id);
+                  if (!hasAny) {
+                    const entryKey = buildEntryKey(course.id, 'inline');
+                    applyScheduleChange(entryKey, {
+                      scheduleDay: 'MON',
+                      scheduleStartTime: '09:00',
+                      scheduleEndTime: '11:00'
+                    }, 'none');
+                    onAddDefault(course.id);
+                  } else {
+                    onAddMeetingDefault(course.id);
+                  }
                 }}
               >
                 เพิ่ม {course.code || 'วิชาใหม่'}
@@ -858,7 +974,7 @@ const ScheduleBuilder = ({
               </div>
             ))}
 
-            {scheduledEntries.map(({ course, schedule }) => {
+            {scheduledEntries.map(({ course, schedule, key, kind, meetingId }) => {
               const colors = buildScheduleColors(course);
               const dayIndex = SCHEDULE_DAYS.indexOf(
                 (schedule.scheduleDay ?? '').toUpperCase() as (typeof SCHEDULE_DAYS)[number]
@@ -878,20 +994,20 @@ const ScheduleBuilder = ({
 
               return (
                 <div
-                  key={course.id}
+                  key={key}
                   className="absolute rounded-3xl backdrop-blur-sm transition-all duration-200 ease-out"
                   style={{
                     left: `calc(${DAY_COLUMN_WIDTH_PX}px + (100% - ${DAY_COLUMN_WIDTH_PX}px) * ${leftRatio})`,
                     width: `calc((100% - ${DAY_COLUMN_WIDTH_PX}px) * ${widthRatio} - 6px)`,
                     top: `${topPosition + 4}px`,
                     height: `${ROW_HEIGHT_PX - 8}px`,
-                    zIndex: interaction?.courseId === course.id ? 30 : 10,
+                    zIndex: interaction?.entryKey === key ? 30 : 10,
                     backgroundColor: colors.background,
                     border: `1px solid ${colors.border}`,
                     boxShadow: blockDisabled ? undefined : `0 18px 36px -18px ${colors.shadow}`,
                     opacity: blockDisabled ? 0.6 : 1,
                   }}
-                  onMouseDown={startInteraction(course.id, 'move')}
+                  onMouseDown={startInteraction(key, course.id, 'move')}
                 >
                   <div className="flex h-full items-stretch gap-3 px-4 py-3 text-xs">
                     <div
@@ -918,16 +1034,20 @@ const ScheduleBuilder = ({
                     <div
                       role="presentation"
                       className="w-2 cursor-ew-resize rounded-full bg-border/70 hover:bg-border"
-                      onMouseDown={startInteraction(course.id, 'resize')}
+                      onMouseDown={startInteraction(key, course.id, 'resize')}
                     />
                     <button
                       type="button"
                       className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border border-destructive/40 bg-background/70 text-destructive shadow-sm transition hover:bg-destructive hover:text-destructive-foreground"
                       onClick={event => {
                         event.stopPropagation();
-                        pendingCommitRef.current.delete(course.id);
-                        applyScheduleChange(course.id, emptySchedule, 'none');
-                        onClear(course.id);
+                        pendingCommitRef.current.delete(key);
+                        applyScheduleChange(key, emptySchedule, 'none');
+                        if (kind === 'inline') {
+                          onClear(course.id);
+                        } else if (meetingId) {
+                          onClearMeeting(course.id, meetingId);
+                        }
                       }}
                       disabled={blockDisabled}
                     >
@@ -953,22 +1073,22 @@ const ScheduleBuilder = ({
             </div>
           )}
 
-        {scheduledEntries.map(({ course, schedule }) => {
+        {scheduledEntries.map(({ course, schedule, key, kind, meetingId }) => {
           const pending = isCoursePending(course.id);
           const disabled = disableInteractions || pending;
           return (
             <div
-              key={`form-${course.id}`}
+              key={`form-${key}`}
               className="grid gap-2 text-sm md:grid-cols-[minmax(0,1fr)_110px_110px_110px_minmax(0,1fr)_40px]"
             >
               <div className="truncate text-sm font-semibold text-foreground">
-                {course.code || 'วิชาใหม่'}
+                {course.code || 'วิชาใหม่'} {kind === 'meeting' ? '(เพิ่ม)' : ''}
               </div>
               <select
                 className="rounded-full border border-border/50 bg-background px-3 py-1 text-xs"
                 value={schedule.scheduleDay ?? 'MON'}
                 onChange={event =>
-                  applyScheduleChange(course.id, { scheduleDay: event.target.value }, 'immediate')
+                  applyScheduleChange(key, { scheduleDay: event.target.value }, 'immediate')
                 }
                 disabled={disabled}
               >
@@ -984,7 +1104,7 @@ const ScheduleBuilder = ({
                 className="rounded-full border border-border/50 bg-background px-3 py-1 text-xs"
                 value={schedule.scheduleStartTime ?? '09:00'}
                 onChange={event =>
-                  applyScheduleChange(course.id, { scheduleStartTime: event.target.value }, 'immediate')
+                  applyScheduleChange(key, { scheduleStartTime: event.target.value }, 'immediate')
                 }
                 disabled={disabled}
               />
@@ -994,7 +1114,7 @@ const ScheduleBuilder = ({
                 className="rounded-full border border-border/50 bg-background px-3 py-1 text-xs"
                 value={schedule.scheduleEndTime ?? '11:00'}
                 onChange={event =>
-                  applyScheduleChange(course.id, { scheduleEndTime: event.target.value }, 'immediate')
+                  applyScheduleChange(key, { scheduleEndTime: event.target.value }, 'immediate')
                 }
                 disabled={disabled}
               />
@@ -1004,9 +1124,9 @@ const ScheduleBuilder = ({
                 placeholder="ห้องเรียน"
                 value={schedule.scheduleRoom ?? ''}
                 onChange={event =>
-                  applyScheduleChange(course.id, { scheduleRoom: event.target.value }, 'deferred')
+                  applyScheduleChange(key, { scheduleRoom: event.target.value }, 'deferred')
                 }
-                onBlur={() => commitSchedule(course.id)}
+                onBlur={() => commitSchedule(key)}
                 disabled={disabled}
               />
               <Button
@@ -1014,9 +1134,13 @@ const ScheduleBuilder = ({
                 size="icon-sm"
                 className="justify-self-end rounded-full border border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground"
                 onClick={() => {
-                  pendingCommitRef.current.delete(course.id);
-                  applyScheduleChange(course.id, emptySchedule, 'none');
-                  onClear(course.id);
+                  pendingCommitRef.current.delete(key);
+                  applyScheduleChange(key, emptySchedule, 'none');
+                  if (kind === 'inline') {
+                    onClear(course.id);
+                  } else if (meetingId) {
+                    onClearMeeting(course.id, meetingId);
+                  }
                 }}
                 disabled={disabled}
               >
@@ -1412,6 +1536,102 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
       });
     },
     [updateCourseSchedule]
+  );
+
+  const addDefaultMeeting = useCallback(
+    async (courseId: string) => {
+      markPending(courseId, true);
+      try {
+        const meeting = await createUserCourseMeetingApi(courseId, {
+          day: 'THU',
+          startTime: '09:00',
+          endTime: '11:00',
+        });
+        setCourses(prev =>
+          prev.map(c =>
+            c.id === courseId
+              ? {
+                  ...c,
+                  meetings: [
+                    ...c.meetings,
+                    {
+                      id: meeting.id,
+                      day: meeting.day || null,
+                      startTime: meeting.startTime || null,
+                      endTime: meeting.endTime || null,
+                      room: meeting.room || null,
+                    },
+                  ],
+                }
+              : c
+          )
+        );
+      } catch (err) {
+        handleApiError(err);
+      } finally {
+        markPending(courseId, false);
+      }
+    },
+    [handleApiError, markPending]
+  );
+
+  const updateMeetingSchedule = useCallback(
+    async (courseId: string, meetingId: string, update: ScheduleUpdate) => {
+      markPending(courseId, true);
+      try {
+        const payload: any = {};
+        if (update.scheduleDay !== undefined) payload.day = update.scheduleDay;
+        if (update.scheduleStartTime !== undefined) payload.startTime = update.scheduleStartTime;
+        if (update.scheduleEndTime !== undefined) payload.endTime = update.scheduleEndTime;
+        if (update.scheduleRoom !== undefined) payload.room = update.scheduleRoom;
+
+        const updated = await updateUserCourseMeetingApi(courseId, meetingId, payload);
+        setCourses(prev =>
+          prev.map(c =>
+            c.id === courseId
+              ? {
+                  ...c,
+                  meetings: c.meetings.map(m =>
+                    m.id === meetingId
+                      ? {
+                          id: updated.id,
+                          day: updated.day || null,
+                          startTime: updated.startTime || null,
+                          endTime: updated.endTime || null,
+                          room: updated.room || null,
+                        }
+                      : m
+                  ),
+                }
+              : c
+          )
+        );
+      } catch (err) {
+        handleApiError(err);
+        await loadCourses();
+      } finally {
+        markPending(courseId, false);
+      }
+    },
+    [handleApiError, loadCourses, markPending]
+  );
+
+  const clearMeeting = useCallback(
+    async (courseId: string, meetingId: string) => {
+      markPending(courseId, true);
+      try {
+        await deleteUserCourseMeetingApi(courseId, meetingId);
+        setCourses(prev =>
+          prev.map(c => (c.id === courseId ? { ...c, meetings: c.meetings.filter(m => m.id !== meetingId) } : c))
+        );
+      } catch (err) {
+        handleApiError(err);
+        await loadCourses();
+      } finally {
+        markPending(courseId, false);
+      }
+    },
+    [handleApiError, loadCourses, markPending]
   );
 
   const handleLogout = useCallback(async () => {
@@ -2198,8 +2418,11 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
                         disableInteractions={isSaving || isLoggingOut}
                         isCoursePending={isCoursePending}
                         onAddDefault={applyDefaultSchedule}
+                        onAddMeetingDefault={addDefaultMeeting}
                         onUpdate={updateCourseSchedule}
+                        onUpdateMeeting={updateMeetingSchedule}
                         onClear={clearCourseSchedule}
+                        onClearMeeting={clearMeeting}
                       />
                     </div>
                   );

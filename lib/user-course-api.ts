@@ -1,5 +1,13 @@
 import type { CourseTypeKey } from "@/lib/course-types";
 
+export type UserCourseMeetingDto = {
+  id: string;
+  day: string;
+  startTime: string;
+  endTime: string;
+  room: string;
+};
+
 export type UserCourseDto = {
   id: string;
   courseId: string;
@@ -16,6 +24,7 @@ export type UserCourseDto = {
   scheduleStartTime: string;
   scheduleEndTime: string;
   scheduleRoom: string;
+  meetings?: UserCourseMeetingDto[];
 };
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -58,6 +67,79 @@ export type CreateUserCoursePayload = {
   scheduleEndTime?: string | null;
   scheduleRoom?: string | null;
 };
+
+export type CreateUserCourseMeetingPayload = {
+  day?: string;
+  startTime?: string;
+  endTime?: string;
+  room?: string;
+};
+
+export async function createUserCourseMeetingApi(
+  userCourseId: string,
+  payload: CreateUserCourseMeetingPayload
+): Promise<UserCourseMeetingDto> {
+  const response = await fetch(`/api/user-courses/${userCourseId}/meetings`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "content-type": "application/json",
+      "accept": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await parseResponse<{ meeting: UserCourseMeetingDto }>(response);
+  return data.meeting;
+}
+
+export type UpdateUserCourseMeetingPayload = {
+  day?: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  room?: string | null;
+};
+
+export async function updateUserCourseMeetingApi(
+  userCourseId: string,
+  meetingId: string,
+  payload: UpdateUserCourseMeetingPayload
+): Promise<UserCourseMeetingDto> {
+  const response = await fetch(`/api/user-courses/${userCourseId}/meetings/${meetingId}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "content-type": "application/json",
+      "accept": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await parseResponse<{ meeting: UserCourseMeetingDto }>(response);
+  return data.meeting;
+}
+
+export async function deleteUserCourseMeetingApi(
+  userCourseId: string,
+  meetingId: string
+): Promise<void> {
+  const response = await fetch(`/api/user-courses/${userCourseId}/meetings/${meetingId}`, {
+    method: "DELETE",
+    credentials: "include",
+    headers: {
+      "accept": "application/json",
+    },
+  });
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type");
+    let message = response.statusText;
+    if (contentType && contentType.includes("application/json")) {
+      const body = await response.json().catch(() => undefined);
+      if (body && typeof body.error === "string") {
+        message = body.error;
+      }
+    }
+    throw new Error(message || "Failed to delete meeting");
+  }
+}
 
 export async function createUserCourseApi(payload: CreateUserCoursePayload): Promise<UserCourseDto> {
   const response = await fetch("/api/user-courses", {
