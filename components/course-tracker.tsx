@@ -452,6 +452,9 @@ type InteractionState =
       startY: number;
       cellWidth: number;
       rowHeight: number;
+      baseStartOffset: number;
+      baseEndOffset: number;
+      baseDayIndex: number;
     }
   | {
       type: 'resize';
@@ -459,6 +462,7 @@ type InteractionState =
       courseId: string;
       startX: number;
       cellWidth: number;
+      baseEndOffset: number;
     };
 
 type ScheduleBuilderProps = {
@@ -775,6 +779,29 @@ const ScheduleBuilder = ({
         pendingCommitRef.current.add(entryKey);
 
         if (type === 'move') {
+          const [cid, kind, _m, meetingId] = entryKey.split("::");
+          const course = courseMapRef.current.get(cid);
+          const schedule: CourseSchedule =
+            localSchedulesRef.current[entryKey] ??
+            (kind === 'inline'
+              ? getScheduleFromCourse(course)
+              : (() => {
+                  const m = course?.meetings.find(x => x.id === (meetingId ?? ''));
+                  return m
+                    ? {
+                        scheduleDay: m.day ?? null,
+                        scheduleStartTime: m.startTime ?? null,
+                        scheduleEndTime: m.endTime ?? null,
+                        scheduleRoom: m.room ?? null,
+                      }
+                    : emptySchedule;
+                })());
+
+          const baseStartOffset = timeToHourOffset(schedule.scheduleStartTime);
+          const baseEndOffset = timeToHourOffset(schedule.scheduleEndTime);
+          const baseDayIndex = SCHEDULE_DAYS.indexOf(
+            (schedule.scheduleDay ?? 'MON') as (typeof SCHEDULE_DAYS)[number]
+          );
           setInteraction({
             type: 'move',
             entryKey,
@@ -782,15 +809,37 @@ const ScheduleBuilder = ({
             startX: event.clientX,
             startY: event.clientY,
             cellWidth,
-            rowHeight
+            rowHeight,
+            baseStartOffset,
+            baseEndOffset,
+            baseDayIndex,
           });
         } else {
+          const [cid, kind, _m, meetingId] = entryKey.split("::");
+          const course = courseMapRef.current.get(cid);
+          const schedule: CourseSchedule =
+            localSchedulesRef.current[entryKey] ??
+            (kind === 'inline'
+              ? getScheduleFromCourse(course)
+              : (() => {
+                  const m = course?.meetings.find(x => x.id === (meetingId ?? ''));
+                  return m
+                    ? {
+                        scheduleDay: m.day ?? null,
+                        scheduleStartTime: m.startTime ?? null,
+                        scheduleEndTime: m.endTime ?? null,
+                        scheduleRoom: m.room ?? null,
+                      }
+                    : emptySchedule;
+                })());
+          const baseEndOffset = timeToHourOffset(schedule.scheduleEndTime);
           setInteraction({
             type: 'resize',
             entryKey,
             courseId,
             startX: event.clientX,
-            cellWidth
+            cellWidth,
+            baseEndOffset,
           });
         }
       },
@@ -811,8 +860,7 @@ const ScheduleBuilder = ({
       }
 
       const course = courseMapRef.current.get(interaction.courseId);
-      const schedule = localSchedulesRef.current[interaction.entryKey] ?? getScheduleFromCourse(course);
-      if (!course || !schedule.scheduleDay || !schedule.scheduleStartTime || !schedule.scheduleEndTime) {
+      if (!course) {
         return;
       }
 
@@ -825,56 +873,45 @@ const ScheduleBuilder = ({
         const hoursDelta = deltaX / cellWidth;
         const daysDelta = Math.round(deltaY / rowHeight);
 
-        const startOffset = timeToHourOffset(schedule.scheduleStartTime);
-        const endOffset = timeToHourOffset(schedule.scheduleEndTime);
-        const duration = Math.max(endOffset - startOffset, MIN_BLOCK_DURATION_HOURS);
+        const duration = Math.max(
+          interaction.baseEndOffset - interaction.baseStartOffset,
+          MIN_BLOCK_DURATION_HOURS
+        );
 
-        const tentativeStart = clamp(startOffset + hoursDelta, 0, TOTAL_SCHEDULE_HOURS - duration);
+        const tentativeStart = clamp(
+          interaction.baseStartOffset + hoursDelta,
+          0,
+          TOTAL_SCHEDULE_HOURS - duration
+        );
         const quantizedStart = Math.round(tentativeStart * 4) / 4;
         const quantizedEnd = quantizedStart + duration;
 
-        const currentDayIndex = SCHEDULE_DAYS.indexOf(schedule.scheduleDay as (typeof SCHEDULE_DAYS)[number]);
-        const newDayIndex = clamp(currentDayIndex + daysDelta, 0, SCHEDULE_DAYS.length - 1);
+        const newDayIndex = clamp(interaction.baseDayIndex + daysDelta, 0, SCHEDULE_DAYS.length - 1);
 
         if (
-          currentDayIndex !== newDayIndex ||
-          Math.abs(quantizedStart - startOffset) >= 0.01
+          daysDelta !== 0 ||
+          Math.abs(hoursDelta) >= 0.01
         ) {
           applyScheduleChange(interaction.entryKey, {
             scheduleDay: SCHEDULE_DAYS[newDayIndex],
             scheduleStartTime: hourOffsetToTime(quantizedStart),
             scheduleEndTime: hourOffsetToTime(quantizedEnd)
           }, 'deferred');
-          setInteraction(prev =>
-            prev && prev.type === 'move'
-              ? { ...prev, startX: event.clientX, startY: event.clientY }
-              : prev
-          );
         }
       } else if (interaction.type === 'resize') {
         const deltaX = event.clientX - interaction.startX;
         const hoursDelta = deltaX / cellWidth;
-        const startOffset = timeToHourOffset(schedule.scheduleStartTime);
-        const endOffset = timeToHourOffset(schedule.scheduleEndTime);
         const tentativeEnd = clamp(
-          endOffset + hoursDelta,
-          startOffset + MIN_BLOCK_DURATION_HOURS,
+          interaction.baseEndOffset + hoursDelta,
+          MIN_BLOCK_DURATION_HOURS,
           TOTAL_SCHEDULE_HOURS
         );
-        const quantizedEnd = Math.max(
-          Math.round(tentativeEnd * 4) / 4,
-          startOffset + MIN_BLOCK_DURATION_HOURS
-        );
+        const quantizedEnd = Math.round(tentativeEnd * 4) / 4;
 
-        if (Math.abs(quantizedEnd - endOffset) >= 0.01) {
+        if (Math.abs(hoursDelta) >= 0.01) {
           applyScheduleChange(interaction.entryKey, {
             scheduleEndTime: hourOffsetToTime(quantizedEnd)
           }, 'deferred');
-          setInteraction(prev =>
-            prev && prev.type === 'resize'
-              ? { ...prev, startX: event.clientX }
-              : prev
-          );
         }
       }
     };
