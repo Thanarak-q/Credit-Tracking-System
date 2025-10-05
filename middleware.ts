@@ -3,7 +3,16 @@ import { NextResponse } from "next/server";
 
 import { SESSION_COOKIE_NAME } from "@/lib/constants";
 
-const PUBLIC_PATHS = ["/", "/login", "/api/auth/login", "/api/auth/register", "/_next", "/favicon.ico", "/public"] as const;
+const PUBLIC_PATHS = [
+  "/",
+  "/login",
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/healthz",
+  "/_next",
+  "/favicon.ico",
+  "/public",
+] as const;
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(path => pathname === path || pathname.startsWith(`${path}/`));

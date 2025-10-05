@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 
+export const dynamic = "force-dynamic";
+
 import { AuthForm } from "@/components/auth/auth-form";
 import { readUserFromSessionCookie } from "@/lib/auth";
 

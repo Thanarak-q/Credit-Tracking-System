@@ -3,6 +3,7 @@ export const COURSE_TYPE_KEYS = [
   "core",
   "major",
   "majorElective",
+  "majorPlan",
   "minor",
   "free",
   "ge",

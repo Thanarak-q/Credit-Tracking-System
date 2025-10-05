@@ -81,6 +81,8 @@ const typeColors: Record<CourseTypeKey, string> = {
     'border-orange-100 bg-orange-50 text-orange-700 dark:border-orange-500/40 dark:bg-orange-500/20 dark:text-orange-100',
   majorElective:
     'border-red-100 bg-red-50 text-red-700 dark:border-red-500/40 dark:bg-red-500/15 dark:text-red-100',
+  majorPlan:
+    'border-cyan-100 bg-cyan-50 text-cyan-700 dark:border-cyan-500/40 dark:bg-cyan-500/20 dark:text-cyan-100',
   minor:
     'border-purple-100 bg-purple-50 text-purple-700 dark:border-purple-500/40 dark:bg-purple-500/20 dark:text-purple-100',
   free:
@@ -94,15 +96,16 @@ const typeLabels: Record<CourseTypeKey, string> = {
   core: 'วิชาแกน',
   major: 'วิชาเอก',
   majorElective: 'วิชาเอกเลือก',
+  majorPlan: 'เอกประจำแผน',
   minor: 'วิชาโท',
   free: 'วิชาเสรี',
   ge: 'วิชา GE'
 };
 
 const planRequirements = {
-  regular: { name: 'แผนปกติ', majorElective: 15 },
-  coop: { name: 'แผนสหกิจศึกษา', majorElective: 12 },
-  honors: { name: 'แผนก้าวหน้า', majorElective: 27 }
+  regular: { name: 'แผนปกติ', majorElective: 15, majorPlan: 3 },
+  coop: { name: 'แผนสหกิจศึกษา', majorElective: 12, majorPlan: 7 },
+  honors: { name: 'แผนก้าวหน้า', majorElective: 27, majorPlan: 3 }
 } as const;
 
 type PlanKey = keyof typeof planRequirements;
@@ -636,6 +639,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
       core: 24,
       major: 41,
       majorElective: selectedPlan ? planRequirements[selectedPlan].majorElective : 0,
+      majorPlan: selectedPlan ? planRequirements[selectedPlan].majorPlan : 0,
       ge: 6,
       free: 6,
       minor: 15
@@ -650,6 +654,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
       core: 0,
       major: 0,
       majorElective: 0,
+      majorPlan: 0,
       minor: 0,
       free: 0,
       ge: 0

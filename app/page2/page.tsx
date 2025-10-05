@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 
+export const dynamic = "force-dynamic";
+
 import CourseTracker from "@/components/course-tracker";
 import { readUserFromSessionCookie } from "@/lib/auth";
 
