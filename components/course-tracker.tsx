@@ -512,7 +512,7 @@ const ScheduleBuilder = ({
     schedule: CourseSchedule;
   };
 
-  const getEntriesForCourse = (course: Course): ScheduleEntry[] => {
+  const getEntriesForCourse = useCallback((course: Course): ScheduleEntry[] => {
     const entries: ScheduleEntry[] = [];
     const inline = getScheduleFromCourse(course);
     if (!areSchedulesEqual(inline, emptySchedule)) {
@@ -536,7 +536,7 @@ const ScheduleBuilder = ({
       }
     });
     return entries;
-  };
+  }, []);
 
   const [localSchedules, setLocalSchedules] = useState<Record<string, CourseSchedule>>(() => {
     const initial: Record<string, CourseSchedule> = {};
@@ -593,11 +593,11 @@ const ScheduleBuilder = ({
 
       return changed ? next : prev;
     });
-  }, [semesterCourses]);
+  }, [semesterCourses, getEntriesForCourse]);
 
   const commitSchedule = useCallback(
     (entryKey: string, scheduleOverride?: CourseSchedule) => {
-      const [courseId, kind, _m, meetingId] = entryKey.split("::");
+      const [courseId, kind, , meetingId] = entryKey.split("::");
       const course = courseMapRef.current.get(courseId);
       if (!course) {
         pendingCommitRef.current.delete(entryKey);
@@ -654,7 +654,7 @@ const ScheduleBuilder = ({
 
   const applyScheduleChange = useCallback(
     (entryKey: string, partial: Partial<CourseSchedule>, mode: 'none' | 'deferred' | 'immediate') => {
-      const [courseId, kind, _m, meetingId] = entryKey.split("::");
+      const [courseId, kind, , meetingId] = entryKey.split("::");
       const course = courseMapRef.current.get(courseId);
       const base: CourseSchedule =
         localSchedulesRef.current[entryKey] ??
@@ -745,7 +745,7 @@ const ScheduleBuilder = ({
       });
   }, [scheduleEntries]);
 
-  const unscheduledCourses = useMemo(
+  useMemo(
     () =>
       scheduleEntries
         .filter(({ schedule }) => !schedule.scheduleDay || !schedule.scheduleStartTime || !schedule.scheduleEndTime)
@@ -779,7 +779,7 @@ const ScheduleBuilder = ({
         pendingCommitRef.current.add(entryKey);
 
         if (type === 'move') {
-          const [cid, kind, _m, meetingId] = entryKey.split("::");
+          const [cid, kind, , meetingId] = entryKey.split("::");
           const course = courseMapRef.current.get(cid);
           const schedule: CourseSchedule =
             localSchedulesRef.current[entryKey] ??
@@ -815,7 +815,7 @@ const ScheduleBuilder = ({
             baseDayIndex,
           });
         } else {
-          const [cid, kind, _m, meetingId] = entryKey.split("::");
+          const [cid, kind, , meetingId] = entryKey.split("::");
           const course = courseMapRef.current.get(cid);
           const schedule: CourseSchedule =
             localSchedulesRef.current[entryKey] ??
@@ -1338,6 +1338,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
         scheduleStartTime: null,
         scheduleEndTime: null,
         scheduleRoom: null,
+        meetings: [],
         isDraft: true
       };
       return sortCourses([...prev, newCourse]);
@@ -1616,7 +1617,7 @@ export default function CourseTracker({ userEmail }: CourseTrackerProps) {
     async (courseId: string, meetingId: string, update: ScheduleUpdate) => {
       markPending(courseId, true);
       try {
-        const payload: any = {};
+        const payload: Record<string, string | null | undefined> = {};
         if (update.scheduleDay !== undefined) payload.day = update.scheduleDay;
         if (update.scheduleStartTime !== undefined) payload.startTime = update.scheduleStartTime;
         if (update.scheduleEndTime !== undefined) payload.endTime = update.scheduleEndTime;

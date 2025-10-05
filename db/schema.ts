@@ -24,9 +24,7 @@ export const users = pgTable(
       .notNull()
       .default(sql`now()`),
   },
-  table => ({
-    emailIdx: uniqueIndex("users_email_idx").on(table.email),
-  })
+  (table) => [uniqueIndex("users_email_idx").on(table.email)]
 );
 
 export const sessions = pgTable(
@@ -40,12 +38,15 @@ export const sessions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .default(sql`now()`),
-    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
   },
-  table => ({
-    tokenIdx: uniqueIndex("sessions_token_idx").on(table.token),
-    userIdx: index("sessions_user_idx").on(table.userId),
-  })
+  (table) => [
+    uniqueIndex("sessions_token_idx").on(table.token),
+    index("sessions_user_idx").on(table.userId),
+  ]
 );
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -74,9 +75,7 @@ export const courses = pgTable(
       .notNull()
       .default(sql`now()`),
   },
-  table => ({
-    codeIdx: uniqueIndex("courses_code_idx").on(table.code),
-  })
+  (table) => [uniqueIndex("courses_code_idx").on(table.code)]
 );
 
 export const userCourses = pgTable(
@@ -106,9 +105,14 @@ export const userCourses = pgTable(
       .notNull()
       .default(sql`now()`),
   },
-  table => ({
-    userCourseIdx: index("user_courses_user_idx").on(table.userId, table.courseId, table.year, table.semester),
-  })
+  (table) => [
+    index("user_courses_user_idx").on(
+      table.userId,
+      table.courseId,
+      table.year,
+      table.semester
+    ),
+  ]
 );
 
 // Additional meetings per user course (for multi-day schedules)
@@ -130,9 +134,7 @@ export const userCourseMeetings = pgTable(
       .notNull()
       .default(sql`now()`),
   },
-  table => ({
-    userCourseIdx: index("user_course_meetings_course_idx").on(table.userCourseId),
-  })
+  (table) => [index("user_course_meetings_course_idx").on(table.userCourseId)]
 );
 
 export const coursesRelations = relations(courses, ({ many }) => ({
@@ -150,12 +152,15 @@ export const userCoursesRelations = relations(userCourses, ({ one }) => ({
   }),
 }));
 
-export const userCourseMeetingsRelations = relations(userCourseMeetings, ({ one }) => ({
-  userCourse: one(userCourses, {
-    fields: [userCourseMeetings.userCourseId],
-    references: [userCourses.id],
-  }),
-}));
+export const userCourseMeetingsRelations = relations(
+  userCourseMeetings,
+  ({ one }) => ({
+    userCourse: one(userCourses, {
+      fields: [userCourseMeetings.userCourseId],
+      references: [userCourses.id],
+    }),
+  })
+);
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
