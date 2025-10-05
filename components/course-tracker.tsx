@@ -142,17 +142,6 @@ const SCHEDULE_HOURS = Array.from({ length: TOTAL_SCHEDULE_HOURS + 1 }, (_, inde
 const DAY_COLUMN_WIDTH_PX = 96; // tailwind w-24
 const ROW_HEIGHT_PX = 70; // tailwind h-[70px]
 const MIN_BLOCK_DURATION_HOURS = 0.5;
-const SCHEDULE_COLORS = [
-  'bg-emerald-500',
-  'bg-sky-500',
-  'bg-amber-500',
-  'bg-rose-500',
-  'bg-indigo-500',
-  'bg-lime-500',
-  'bg-fuchsia-500',
-  'bg-cyan-500'
-];
-
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 type CourseSchedule = {
@@ -269,6 +258,43 @@ const areSchedulesEqual = (a: CourseSchedule | undefined, b: CourseSchedule | un
     a.scheduleEndTime === b.scheduleEndTime &&
     a.scheduleRoom === b.scheduleRoom
   );
+};
+
+const getPaletteIndex = (course: Course): number => {
+  const key = (course.id || course.courseId || course.code || '').trim();
+  if (!key) {
+    return 0;
+  }
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = (hash * 31 + key.charCodeAt(index)) % 997;
+  }
+  return Math.abs(hash);
+};
+
+type ScheduleColorTokens = {
+  background: string;
+  border: string;
+  accent: string;
+  shadow: string;
+};
+
+const buildScheduleColors = (course: Course): ScheduleColorTokens => {
+  const hash = getPaletteIndex(course);
+  const hue = hash % 360;
+  const saturation = 55 + (hash % 25); // 55-79
+  const lightness = 24 + (hash % 12); // 24-35
+  const accentLightness = Math.min(lightness + 22, 65);
+  const backgroundAlpha = 0.18 + ((hash % 20) / 100); // 0.18-0.37
+  const borderLightness = Math.max(lightness - 6, 14);
+  const shadowAlpha = 0.45;
+
+  return {
+    background: `hsl(${hue} ${saturation}% ${lightness}% / ${backgroundAlpha})`,
+    border: `hsl(${hue} ${saturation}% ${borderLightness}% / 0.55)`,
+    accent: `hsl(${hue} ${saturation}% ${accentLightness}%)`,
+    shadow: `hsl(${hue} ${saturation}% ${accentLightness}% / ${shadowAlpha})`,
+  };
 };
 
 const isBrowser = typeof window !== 'undefined';
@@ -800,7 +826,7 @@ const ScheduleBuilder = ({
       )}
 
       <div className="overflow-x-auto">
-        <div className="min-w-[900px]">
+        <div className="min-w-[640px] md:min-w-[900px]">
           <div className="flex border-b border-border/60 bg-muted/60 text-xs font-semibold uppercase text-muted-foreground">
             <div className="w-24 border-r border-border/40 px-3 py-2 text-center">Day / Time</div>
             {SCHEDULE_HOURS.map(hour => (
@@ -820,7 +846,7 @@ const ScheduleBuilder = ({
                 data-day-row
                 className="flex h-[70px] border-b border-border/30 bg-background/40"
               >
-                <div className="flex w-24 items-center justify-center border-r border-border/20 px-3 text-xs font-semibold uppercase text-muted-foreground">
+                <div className="flex w-24 items-center justify-center border-r border-border/20 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   {day}
                 </div>
                 {SCHEDULE_HOURS.map(hour => (
@@ -832,7 +858,8 @@ const ScheduleBuilder = ({
               </div>
             ))}
 
-            {scheduledEntries.map(({ course, schedule }, index) => {
+            {scheduledEntries.map(({ course, schedule }) => {
+              const colors = buildScheduleColors(course);
               const dayIndex = SCHEDULE_DAYS.indexOf(
                 (schedule.scheduleDay ?? '').toUpperCase() as (typeof SCHEDULE_DAYS)[number]
               );
@@ -852,44 +879,50 @@ const ScheduleBuilder = ({
               return (
                 <div
                   key={course.id}
-                  className={`absolute ${SCHEDULE_COLORS[index % SCHEDULE_COLORS.length]} text-white`
-                    .concat(' shadow-lg transition-opacity')
-                    .concat(blockDisabled ? ' opacity-60' : '')}
+                  className="absolute rounded-3xl backdrop-blur-sm transition-all duration-200 ease-out"
                   style={{
                     left: `calc(${DAY_COLUMN_WIDTH_PX}px + (100% - ${DAY_COLUMN_WIDTH_PX}px) * ${leftRatio})`,
                     width: `calc((100% - ${DAY_COLUMN_WIDTH_PX}px) * ${widthRatio} - 6px)`,
                     top: `${topPosition + 4}px`,
                     height: `${ROW_HEIGHT_PX - 8}px`,
                     zIndex: interaction?.courseId === course.id ? 30 : 10,
+                    backgroundColor: colors.background,
+                    border: `1px solid ${colors.border}`,
+                    boxShadow: blockDisabled ? undefined : `0 18px 36px -18px ${colors.shadow}`,
+                    opacity: blockDisabled ? 0.6 : 1,
                   }}
                   onMouseDown={startInteraction(course.id, 'move')}
                 >
-                  <div className="flex h-full items-stretch gap-2 px-3 py-2 text-xs">
+                  <div className="flex h-full items-stretch gap-3 px-4 py-3 text-xs">
+                    <div
+                      className="my-auto hidden h-10 w-1.5 rounded-full md:block"
+                      style={{ backgroundColor: colors.accent }}
+                    />
                     <div className="flex-1 overflow-hidden">
-                      <div className="truncate text-sm font-semibold">
+                      <div className="truncate text-sm font-semibold tracking-wide">
                         {course.code || 'วิชา'}
                       </div>
-                      <div className="truncate text-[11px] opacity-90">
+                      <div className="truncate text-[11px] text-muted-foreground">
                         {course.nameTH || course.nameEN || 'ยังไม่ระบุชื่อ'}
                       </div>
-                      <div className="mt-1 flex items-center gap-1 text-[10px] uppercase tracking-wide">
-                        <Clock className="h-3 w-3" />
+                      <div className="mt-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        <Clock className="h-3 w-3" strokeWidth={2} />
                         {schedule.scheduleStartTime} - {schedule.scheduleEndTime}
                       </div>
                       {schedule.scheduleRoom && (
-                        <div className="truncate text-[10px] opacity-90">
+                        <div className="truncate text-[10px] text-muted-foreground">
                           ห้อง {schedule.scheduleRoom}
                         </div>
                       )}
                     </div>
                     <div
                       role="presentation"
-                      className="w-2 cursor-ew-resize rounded-full bg-white/30 hover:bg-white/60"
+                      className="w-2 cursor-ew-resize rounded-full bg-border/70 hover:bg-border"
                       onMouseDown={startInteraction(course.id, 'resize')}
                     />
                     <button
                       type="button"
-                      className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-white/80 text-rose-600 shadow hover:bg-rose-600 hover:text-white"
+                      className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border border-destructive/40 bg-background/70 text-destructive shadow-sm transition hover:bg-destructive hover:text-destructive-foreground"
                       onClick={event => {
                         event.stopPropagation();
                         pendingCommitRef.current.delete(course.id);
@@ -914,11 +947,11 @@ const ScheduleBuilder = ({
           <span>ปรับวัน / เวลา / ห้องเรียน</span>
         </div>
 
-        {scheduledEntries.length === 0 && (
-          <div className="rounded-md border border-dashed border-border/30 bg-muted/40 py-4 text-center text-xs text-muted-foreground">
-            ยังไม่มีวิชาในตาราง กดปุ่ม “เพิ่ม” เพื่อเริ่มกำหนดเวลาเรียน
-          </div>
-        )}
+          {scheduledEntries.length === 0 && (
+            <div className="rounded-md border border-dashed border-border/30 bg-muted/40 py-4 text-center text-xs text-muted-foreground">
+              ยังไม่มีวิชาในตาราง กดปุ่ม “เพิ่ม” เพื่อเริ่มกำหนดเวลาเรียน
+            </div>
+          )}
 
         {scheduledEntries.map(({ course, schedule }) => {
           const pending = isCoursePending(course.id);
@@ -928,11 +961,11 @@ const ScheduleBuilder = ({
               key={`form-${course.id}`}
               className="grid gap-2 text-sm md:grid-cols-[minmax(0,1fr)_110px_110px_110px_minmax(0,1fr)_40px]"
             >
-              <div className="truncate font-semibold text-foreground">
+              <div className="truncate text-sm font-semibold text-foreground">
                 {course.code || 'วิชาใหม่'}
               </div>
               <select
-                className="rounded-md border border-border/50 bg-background px-2 py-1 text-xs"
+                className="rounded-full border border-border/50 bg-background px-3 py-1 text-xs"
                 value={schedule.scheduleDay ?? 'MON'}
                 onChange={event =>
                   applyScheduleChange(course.id, { scheduleDay: event.target.value }, 'immediate')
@@ -948,7 +981,7 @@ const ScheduleBuilder = ({
               <input
                 type="time"
                 step={900}
-                className="rounded-md border border-border/50 bg-background px-2 py-1 text-xs"
+                className="rounded-full border border-border/50 bg-background px-3 py-1 text-xs"
                 value={schedule.scheduleStartTime ?? '09:00'}
                 onChange={event =>
                   applyScheduleChange(course.id, { scheduleStartTime: event.target.value }, 'immediate')
@@ -958,7 +991,7 @@ const ScheduleBuilder = ({
               <input
                 type="time"
                 step={900}
-                className="rounded-md border border-border/50 bg-background px-2 py-1 text-xs"
+                className="rounded-full border border-border/50 bg-background px-3 py-1 text-xs"
                 value={schedule.scheduleEndTime ?? '11:00'}
                 onChange={event =>
                   applyScheduleChange(course.id, { scheduleEndTime: event.target.value }, 'immediate')
@@ -967,7 +1000,7 @@ const ScheduleBuilder = ({
               />
               <input
                 type="text"
-                className="rounded-md border border-border/50 bg-background px-2 py-1 text-xs"
+                className="rounded-full border border-border/50 bg-background px-3 py-1 text-xs"
                 placeholder="ห้องเรียน"
                 value={schedule.scheduleRoom ?? ''}
                 onChange={event =>
@@ -979,7 +1012,7 @@ const ScheduleBuilder = ({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="justify-self-end text-destructive hover:text-destructive"
+                className="justify-self-end rounded-full border border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground"
                 onClick={() => {
                   pendingCommitRef.current.delete(course.id);
                   applyScheduleChange(course.id, emptySchedule, 'none');
